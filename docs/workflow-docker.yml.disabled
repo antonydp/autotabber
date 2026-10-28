@@ -1,3 +1,11 @@
+# Workflow GitHub Actions per la build automatica delle immagini GHCR.
+#
+# ATTIVAZIONE: serve un token con scope "workflow".
+#   1) git mv docs/workflow-docker.yml.disabled .github/workflows/docker.yml
+#   2) commit + push con un PAT con scope repo+workflow
+# Dopodiche' ogni push su main pubblica:
+#   ghcr.io/<owner>/autotabber-{api,worker,web}:latest
+
 name: docker
 
 on:

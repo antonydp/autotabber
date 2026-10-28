@@ -1,12 +1,15 @@
 # ============================================================
-#  Autotabber — stack Docker / Portainer
+#  Autotabber — stack Docker / Portainer (build ibrida)
 #  YouTube  ->  chitarra tab suonabile (Demucs + Basic Pitch + alphaTab)
 #
-#  Deploy Portainer (CE/BE):
-#    Stacks -> Add stack -> Repository
-#      Repository URL : https://github.com/antonydp/autotabber
-#      Compose path   : docker-compose.yml
-#    (oppure incolla questo file nel Web editor)
+#  Ogni servizio ha SIA image: (ghcr.io) SIA build: — quindi:
+#   - Portainer -> Stacks -> Add stack -> Repository
+#       Repository URL: https://github.com/antonydp/autotabber
+#       Compose path  : docker-compose.yml
+#     (Portainer clona e costruisce le immagini dal sorgente)
+#   - CLI:  docker compose up -d --build
+#   - Se le immagini GHCR sono già disponibili (vedi README),
+#     il pull viene usato al posto della build.
 #
 #  Le chiavi Modal NON vanno mai scritte qui: usale come
 #  variabili d'ambiente nello stack Portainer o in un file .env
@@ -29,6 +32,7 @@ services:
 
   api:
     image: ghcr.io/antonydp/autotabber-api:latest
+    build: ./api
     environment:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
@@ -46,6 +50,7 @@ services:
 
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest
+    build: ./worker
     environment:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
@@ -69,6 +74,7 @@ services:
 
   web:
     image: ghcr.io/antonydp/autotabber-web:latest
+    build: ./web
     ports:
       - "${WEB_PORT:-8088}:80"
     depends_on:

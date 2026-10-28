@@ -19,8 +19,10 @@ YouTube ──yt-dlp──► audio.wav ──Demucs (htdemucs_6s)──► stem
 | `worker` | Python + torch CPU + Demucs + Basic Pitch + yt-dlp | pipeline pesante |
 | `redis` | Redis 7 | coda job (RQ) + metadati |
 
-Le immagini sono pubblicate da GitHub Actions su
-`ghcr.io/antonydp/autotabber-{api,worker,web}:latest`.
+Le immagini possono essere pubblicate automaticamente su
+`ghcr.io/antonydp/autotabber-{api,worker,web}:latest` abilitando GitHub
+Actions (vedi sotto) — ma lo stack **funziona anche senza**, costruendo
+le immagini in loco.
 
 ## Requisiti
 
@@ -31,32 +33,43 @@ Le immagini sono pubblicate da GitHub Actions su
 
 ## Deploy su Portainer
 
-### Metodo 1 — Web editor (consigliato)
+### Metodo 1 — Da repository Git (consigliato, funziona subito)
 
-1. **Portainer → Stacks → + Add stack → Web editor**
-2. Incolla il contenuto di [`docker-compose.yml`](docker-compose.yml)
+1. **Portainer → Stacks → + Add stack → Repository**
+2. Repository URL: `https://github.com/antonydp/autotabber`,
+   Compose path: `docker-compose.yml`, branch `main`
 3. Nella sezione **Environment variables** aggiungi (opzionale):
    `MODAL_ENABLED=1`, `MODAL_TOKEN_ID=…`, `MODAL_TOKEN_SECRET=…`
    (e se serve `WEB_PORT=8088`)
-4. **Deploy the stack**
+4. **Deploy the stack** — Portainer clona il repo e costruisce le immagini
+   (la prima build del worker scarica torch/TF: ~5–10 min)
 
-### Metodo 2 — Da repository Git
+### Metodo 2 — Web editor (richiede immagini GHCR già pubblicate)
 
-1. **Stacks → + Add stack → Repository**
-2. Repository URL: `https://github.com/antonydp/autotabber`,
-   Compose path: `docker-compose.yml`, branch `main`
-3. Aggiungi le environment variables come sopra → **Deploy**
+1. Incolla `docker-compose.yml` in **Stacks → Add stack → Web editor**
+2. Aggiungi le environment variables → **Deploy**
+3. Le immagini vengono scaricate da GHCR (vedi "Abilitare la build
+   automatica" qui sotto)
 
-> Se le immagini GHCR risultassero private: su GitHub apri
-> `https://github.com/antonydp?tab=packages` → pacchetto →
-> *Package settings → Change visibility → Public* (una tantum), oppure
-> configura le credenziali GHCR in **Portainer → Registries**.
-
-### Build locale (senza GHCR)
+### CLI (senza Portainer)
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+git clone https://github.com/antonydp/autotabber && cd autotabber
+docker compose up -d --build
 ```
+
+### Abilitare la build automatica (GHCR, opzionale)
+
+Il token usato per il push non ha scope `workflow`, quindi il workflow non è
+attivo. Per attivarlo:
+
+1. Crea un PAT GitHub con scope **repo + workflow**
+2. Sposta il file: `docs/workflow-docker.yml.disabled` →
+   `.github/workflows/docker.yml` e fai push con il nuovo token
+3. Ad ogni push su `main` Actions pubblica le tre immagini su GHCR
+4. Rendi pubblici i pacchetti su `https://github.com/antonydp?tab=packages`
+   (*Package settings → Change visibility → Public*, una tantum): da quel
+   momento il Metodo 2 (Web editor) funziona senza build
 
 ## GPU opzionale con Modal
 
@@ -97,6 +110,7 @@ GET    /api/jobs            lista job
 GET    /api/jobs/{id}       stato: queued|downloading|separating|transcribing|rendering|done|error
 GET    /api/jobs/{id}/tex   alphaTex generato
 GET    /api/jobs/{id}/midi  MIDI scaricabile
+GET    /api/jobs/{id}/gp5   Guitar Pro 5 scaricabile (se generato)
 DELETE /api/jobs/{id}       elimina job e file
 ```
 
