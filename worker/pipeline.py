@@ -58,6 +58,29 @@ def download_audio(url: str, d: Path) -> dict:
         "socket_timeout": 30,
         "retries": 3,
     }
+
+    # --- Anti-bot YouTube (tutti opzionali, configurabili via env) ---
+    # YT_COOKIES_FILE: file cookies Netscape esportato dal browser
+    # (necessario da IP datacenter: "Sign in to confirm you're not a bot")
+    cookies = os.getenv("YT_COOKIES_FILE", "").strip()
+    if cookies:
+        if Path(cookies).is_file():
+            opts["cookiefile"] = cookies
+            log.info("yt-dlp: cookie da %s", cookies)
+        else:
+            log.warning("YT_COOKIES_FILE=%s non trovato, procedo senza", cookies)
+    # YT_PLAYER_CLIENT: client alternativo (es. tv_simply, android_vr) che
+    # a volte aggira il bot-check senza cookie
+    client = os.getenv("YT_PLAYER_CLIENT", "").strip()
+    if client:
+        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+        log.info("yt-dlp: player_client=%s", client)
+    # YT_PROXY: proxy HTTP/SOCKS per uscire con un IP non-datacenter
+    proxy = os.getenv("YT_PROXY", "").strip()
+    if proxy:
+        opts["proxy"] = proxy
+        log.info("yt-dlp: uso proxy %s", proxy.rsplit("://", 1)[0] + "://***")
+
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
     if info.get("_type") == "playlist":
