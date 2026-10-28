@@ -1,0 +1,93 @@
+# ============================================================
+#  Autotabber — stack Portainer "solo immagini" (web editor)
+#
+#  Usalo quando le immagini GHCR sono già pubblicate dal workflow
+#  GitHub Actions (attivato in .github/workflows/docker.yml):
+#    ghcr.io/antonydp/autotabber-{api,worker,web}:latest
+#
+#  Deploy su Portainer:
+#    Stacks -> Add stack -> Web editor -> incolla questo file
+#    e aggiungi le variabili d'ambiente nella sezione
+#    "Environment variables" (MAI le chiavi dentro questo file!).
+#
+#  Deploy alternativo SENZA CI (Portainer clona e costruisce):
+#    Stacks -> Add stack -> Repository -> docker-compose.yml
+#
+#  Suggerimento: se attivi Modal (MODAL_ENABLED=1), Demucs gira
+#  dentro Modal: imposta anche DEMUCS_ENABLED=0 per evitare la
+#  separazione doppia (locale + remota).
+# ============================================================
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    image: ghcr.io/antonydp/autotabber-api:latest
+    pull_policy: always
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    volumes:
+      - app-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    image: ghcr.io/antonydp/autotabber-worker:latest
+    pull_policy: always
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      DEMUCS_ENABLED: ${DEMUCS_ENABLED:-1}
+      DEMUCS_MODEL: ${DEMUCS_MODEL:-htdemucs_6s}
+      KEEP_AUDIO: ${KEEP_AUDIO:-0}
+      YT_MAX_DURATION_SEC: ${YT_MAX_DURATION_SEC:-900}
+      YT_DLP_UPDATE: ${YT_DLP_UPDATE:-0}
+      MODAL_ENABLED: ${MODAL_ENABLED:-0}
+      MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+      MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+      MODAL_APP: ${MODAL_APP:-autotabber}
+      MODAL_FN: ${MODAL_FN:-transcribe}
+      TORCH_HOME: /data/torch-cache
+    volumes:
+      - app-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/antonydp/autotabber-web:latest
+    pull_policy: always
+    ports:
+      - "${WEB_PORT:-8088}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
+  app-data:
