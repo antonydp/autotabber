@@ -1,0 +1,7 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+yt-dlp>=2024.8.6
+pretty_midi>=0.2.10
+modal>=0.70
+pyguitarpro>=0.8
+numpy

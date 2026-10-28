@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoTabber - YouTube to Tab</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M11 3a4 4 0 0 1 4 4c0 1-.4 1.7-.9 2.4l4.6 4.6a3.2 3.2 0 1 1-1.6 1.6L12.5 11A4 4 0 1 1 11 3Z"/>
+        <circle cx="9" cy="9" r="1.6"/>
+      </svg>
+      <span>Auto<b>Tabber</b></span>
+    </div>
+    <div class="subtitle">YouTube &rarr; tab con lettore &middot; self-hosted</div>
+  </header>
+
+  <main>
+    <section class="card" id="form-card">
+      <h1>Genera una tab da un link YouTube</h1>
+      <p class="hint">
+        Il brano viene separato con Mel-Band RoFormer, trascritto con Basic Pitch
+        e trasformato in tablatura con corde e tasti. Tutto il calcolo gira sul tuo account Modal.
+      </p>
+      <div class="row">
+        <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." spellcheck="false" />
+        <select id="instrument" title="Strumento">
+          <option value="electric">Chitarra elettrica</option>
+          <option value="acoustic">Chitarra acustica</option>
+          <option value="bass">Basso</option>
+        </select>
+        <button id="go" class="primary">Genera tab</button>
+      </div>
+      <div id="error" class="error hidden"></div>
+    </section>
+
+    <section class="card hidden" id="progress-card">
+      <h2 id="stage">Preparazione&hellip;</h2>
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+      <p id="job-title" class="hint"></p>
+    </section>
+
+    <section class="card hidden" id="player-card">
+      <div class="player-head">
+        <div>
+          <h2 id="result-title">Trascrizione</h2>
+          <p class="hint"><span id="meta"></span></p>
+        </div>
+        <div class="controls">
+          <button id="btn-play" class="primary" title="Play/Pausa (spazio)">&#9654;</button>
+          <button id="btn-stop" title="Stop">&#9724;</button>
+          <label class="speed">Velocit&agrave;
+            <span id="speed-label">1.00&times;</span>
+            <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1" />
+          </label>
+        </div>
+      </div>
+
+      <div id="alphatab"></div>
+
+      <div class="downloads" id="downloads"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>AutoTabber &middot; Mel-Band RoFormer + Basic Pitch su Modal &middot; player alphaTab (MPL-2.0)</span>
+  </footer>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>
