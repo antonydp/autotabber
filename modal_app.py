@@ -27,6 +27,8 @@ image = (
         "basic-pitch",
         "numpy<2",
         "mido",
+        # setuptools>=84 ha rimosso pkg_resources, richiesto da resampy/basic-pitch
+        "setuptools<81",
     )
 )
 
@@ -38,7 +40,8 @@ cache = modal.Volume.from_name("autotabber-cache", create_if_missing=True)
     gpu="T4",
     timeout=1800,
     memory=8192,
-    volumes={"/root/.cache": cache},
+    volumes={"/cache": cache},
+    env={"TORCH_HOME": "/cache/torch", "XDG_CACHE_HOME": "/cache"},
 )
 def transcribe(audio: bytes) -> bytes:
     """audio (wav/mp3/...) -> MIDI bytes (stem chitarra trascritto)."""

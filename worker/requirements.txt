@@ -9,3 +9,5 @@ rq==2.*
 redis==5.*
 modal>=0.73
 numpy<2
+# setuptools>=84 ha rimosso pkg_resources, richiesto da resampy/basic-pitch
+setuptools<81
