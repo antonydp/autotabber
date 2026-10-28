@@ -1,0 +1,153 @@
+/* Autotabber — tema scuro */
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1d212b;
+  --text: #e8eaf0;
+  --muted: #9aa3b2;
+  --accent: #ff8a3d;
+  --accent-2: #ffb066;
+  --ok: #3ddc84;
+  --err: #ff5d5d;
+  --line: #232833;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+
+header {
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #14171e, var(--bg));
+}
+header h1 { margin: 0; padding-top: 22px; font-size: 1.6rem; letter-spacing: .3px; }
+header .sub { margin: 6px 0 18px; color: var(--muted); }
+.logo { filter: saturate(1.2); }
+
+main { padding: 22px 20px 60px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+#form { display: flex; gap: 10px; }
+#url {
+  flex: 1;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  outline: none;
+}
+#url:focus { border-color: var(--accent); }
+
+button, .btn-link {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 16px;
+  font-size: .95rem;
+  text-decoration: none;
+  display: inline-block;
+  color: var(--text);
+}
+.primary { background: var(--accent); color: #16110b; font-weight: 700; }
+.primary:hover { background: var(--accent-2); }
+.primary:disabled { opacity: .55; cursor: wait; }
+.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+.ghost:hover { border-color: var(--accent); color: var(--accent-2); }
+
+.msg { margin-top: 10px; font-size: .9rem; }
+.msg.error { color: var(--err); }
+.msg.info { color: var(--muted); }
+
+h2 { font-size: 1.1rem; margin: 26px 0 12px; }
+
+.grid { display: grid; gap: 12px; }
+.empty { color: var(--muted); padding: 18px 4px; }
+
+.job {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.job .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job .title { font-weight: 600; }
+.job .artist, .job .meta { color: var(--muted); font-size: .88rem; }
+.job .grow { flex: 1; }
+
+.chip {
+  font-size: .78rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.chip.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+.chip.busy { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+.bar {
+  height: 5px;
+  background: var(--panel-2);
+  border-radius: 999px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s ease; }
+.job .error-text { color: var(--err); font-size: .85rem; margin-top: 8px; }
+
+/* Player */
+#player-view {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+#player-view.hidden { display: none; }
+.player-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.pv-meta { flex: 1; min-width: 160px; }
+.pv-meta h2 { margin: 0; font-size: 1.05rem; }
+.muted { color: var(--muted); font-size: .88rem; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.controls select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+#pv-status { padding-top: 8px; min-height: 26px; }
+
+#viewport { flex: 1; overflow: auto; padding: 16px 20px 40px; }
+#alphaTab { background: #fff; border-radius: 10px; min-height: 300px; }
+
+@media (max-width: 640px) {
+  #form { flex-direction: column; }
+  .player-head { gap: 8px; }
+}

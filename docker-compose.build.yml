@@ -1,0 +1,15 @@
+# Override per build LOCALE (senza GitHub Actions / GHCR):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Il file base usa solo immagini pronte (ghcr.io/antonydp/*); questo
+# override aggiunge i contesti di build e ricostruisce in locale.
+services:
+
+  api:
+    build: ./api
+
+  worker:
+    build: ./worker
+
+  web:
+    build: ./web

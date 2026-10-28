@@ -1,121 +1,136 @@
-# AutoTabber
+# 🎸 Autotabber
 
-**YouTube link -> tablatura con lettore stile Songsterr, self-hosted.**
-
-Incolli un link YouTube, scegli lo strumento (elettrica / acustica / basso) e ottieni una
-tablatura riproducibile nel browser con cursore di sincronizzazione, controllo velocità e
-download in Guitar Pro, MIDI e alphaTex.
-
-## Come funziona
+**Self-hosted, pronto per Portainer.** Incolla un link YouTube e ottieni una
+tablatura chitarra con diteggiatura, visualizzata e **suonabile nel browser**
+(grazie ad alphaTab), senza dipendenze da servizi a pagamento.
 
 ```
-YouTube ──(yt-dlp)──► mix audio ──► ┌─────────────────────────┐
-                                    │ MODAL GPU (A10G)        │
-                                    │ Mel-Band RoFormer 2025  │  separazione stem chitarra
-                                    │ (becruily checkpoint)   │
-                                    └───────────┬─────────────┘
-                                                │ stem chitarra
-                                                ▼
-                                    ┌─────────────────────────┐
-                                    │ MODAL CPU               │
-                                    │ Basic Pitch (ONNX)      │  audio → MIDI + tempo
-                                    └───────────┬─────────────┘
-                                                │ MIDI
-                                                ▼
-                                    ┌─────────────────────────┐
-                                    │ APP DOCKER (FastAPI)    │
-                                    │ fingering DP → alphaTex │  corde/tasti ottimali
-                                    │ player alphaTab         │  lettore stile Songsterr
-                                    └─────────────────────────┘
+YouTube ──yt-dlp──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
+        ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
+        ──alphaTab nel browser──► tab suonabile ▶
 ```
 
-- **Separazione**: [Mel-Band RoFormer](https://huggingface.co/becruily/mel-band-roformer-guitar)
-  (checkpoint 2025 dedicato alla chitarra) eseguito con
-  [MSST](https://github.com/ZFTurbo/Music-Source-Separation-Training) su GPU Modal.
-- **Trascrizione**: [Basic Pitch](https://github.com/spotify/basic-pitch) di Spotify (ONNX) su CPU Modal.
-- **Tab**: algoritmo di diteggiatura (programmazione dinamica) che minimizza gli spostamenti
-  della mano, con supporto accordi.
-- **Lettore**: [alphaTab](https://alphatab.net) (MPL-2.0), vendorizzato — nessun CDN esterno.
+## Servizi dello stack
+
+| Servizio | Immagine | Ruolo |
+|----------|----------|-------|
+| `web` | nginx + alphaTab (vendored) | UI + player tab, proxy `/api` |
+| `api` | FastAPI | crea/consulta i job |
+| `worker` | Python + torch CPU + Demucs + Basic Pitch + yt-dlp | pipeline pesante |
+| `redis` | Redis 7 | coda job (RQ) + metadati |
+
+Le immagini sono pubblicate da GitHub Actions su
+`ghcr.io/antonydp/autotabber-{api,worker,web}:latest`.
 
 ## Requisiti
 
-- Un account [Modal](https://modal.com) gratuito (per GPU/CPU) con token attivo
-- Docker
+- Docker / Portainer (CE va benissimo)
+- ~2 GB liberi su disco per l'immagine worker
+- **RAM: 6–8 GB liberi per il worker** (Demucs `htdemucs_6s` su CPU è affamato)
+- Connessione internet (YouTube + download modelli al primo avvio)
 
-## Setup
+## Deploy su Portainer
 
-1. **Chiavi Modal** — copia l'esempio e inserisci le tue credenziali:
+### Metodo 1 — Web editor (consigliato)
 
-   ```bash
-   cp .env.example .env
-   # edita .env: MODAL_TOKEN_ID=...  MODAL_TOKEN_SECRET=...
-   # (modal token new  per generarle)
-   ```
+1. **Portainer → Stacks → + Add stack → Web editor**
+2. Incolla il contenuto di [`docker-compose.yml`](docker-compose.yml)
+3. Nella sezione **Environment variables** aggiungi (opzionale):
+   `MODAL_ENABLED=1`, `MODAL_TOKEN_ID=…`, `MODAL_TOKEN_SECRET=…`
+   (e se serve `WEB_PORT=8088`)
+4. **Deploy the stack**
 
-   Le chiavi vivono **solo** nel file `.env` (gitignored) o nell'ambiente del container:
-   non sono mai salvate nel codice né nella repo.
+### Metodo 2 — Da repository Git
 
-2. **Avvia**:
+1. **Stacks → + Add stack → Repository**
+2. Repository URL: `https://github.com/antonydp/autotabber`,
+   Compose path: `docker-compose.yml`, branch `main`
+3. Aggiungi le environment variables come sopra → **Deploy**
 
-   ```bash
-   docker compose up --build
-   ```
+> Se le immagini GHCR risultassero private: su GitHub apri
+> `https://github.com/antonydp?tab=packages` → pacchetto →
+> *Package settings → Change visibility → Public* (una tantum), oppure
+> configura le credenziali GHCR in **Portainer → Registries**.
 
-   Alla prima richiesta il container esegue automaticamente `modal deploy modal_app.py`
-   (build dell'immagine MSST ~5-10 minuti, poi cached da Modal).
-
-3. Apri `http://localhost:8000`, incolla il link e genera.
-
-Per il deploy manuale della parte Modal:
+### Build locale (senza GHCR)
 
 ```bash
-pip install modal && modal deploy modal_app.py
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-## Costi Modal (indicativi)
+## GPU opzionale con Modal
 
-- Separazione GPU A10G: ~0.0006 $/s → tipicamente 0.05-0.40 $ a brano
-- Trascrizione CPU: ~0.01-0.05 $ a brano
-- Con `scaledown_window` di 60s, brani consecutivi riutilizzano i container (cold start evitati)
+Il worker di default lavora su CPU: Demucs impiega ~2–5 min/brano.
+Con [Modal](https://modal.com) (piano free) separazione + trascrizione girano
+su T4 in ~20–40 secondi.
 
-## Struttura
-
-```
-autotabber/
-├── modal_app.py          # funzioni Modal: separazione GPU + trascrizione CPU
-├── backend/
-│   ├── main.py           # FastAPI: job API + static frontend
-│   ├── pipeline.py       # orchestrazione yt-dlp → Modal → MIDI → tab
-│   ├── fingering.py      # DP stringa/tasto
-│   ├── alphatex.py       # quantizzazione ritmica + alphaTex
-│   ├── tabwriter.py      # export Guitar Pro 5
-│   └── settings.py       # config da env (nessuna chiave hard-coded)
-├── frontend/
-│   ├── index.html        # UI
-│   ├── assets/           # css + js (player alphaTab)
-│   └── vendor/alphatab/  # alphaTab + font Bravura + soundfont (vendorizzato)
-├── Dockerfile
-├── docker-compose.yml
-└── scripts/deploy_modal.sh
+```bash
+export MODAL_TOKEN_ID=...        # chiavi SOLO come variabili, mai nei file
+export MODAL_TOKEN_SECRET=...
+modal deploy modal_app.py        # crea l'app "autotabber"
 ```
 
-## Limiti noti (v1)
+Poi nello stack Portainer: `MODAL_ENABLED=1` + le due chiavi come env vars.
+In caso di errore Modal il worker ricade automaticamente su Basic Pitch locale.
 
-- Accordatura standard (EADGBE) / basso standard; nessun capo o drop-tuning
-- Ritmica quantizzata sulla semicroma: sincopazioni complesse possono semplificarsi
-- Le tecniche (bend, slide, hammer-on) non sono rilevate
-- Tracce con chitarra molto distorta/mista al resto danno trascrizioni più rumorose
-- Il download da YouTube dipende dalla disponibilità di yt-dlp (aggiornalo se fallisce)
+## Variabili d'ambiente
+
+| Variabile | Default | Descrizione |
+|-----------|---------|-------------|
+| `WEB_PORT` | `8088` | porta web esposta |
+| `MODAL_ENABLED` | `0` | `1` = usa GPU Modal se disponibile |
+| `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | — | credenziali Modal (mai committare) |
+| `MODAL_APP` / `MODAL_FN` | `autotabber` / `transcribe` | funzione remota |
+| `DEMUCS_ENABLED` | `1` | separazione stems (0 = trascrivi l'audio intero) |
+| `DEMUCS_MODEL` | `htdemucs_6s` | modello Demucs (6 stems: include la chitarra) |
+| `YT_MAX_DURATION_SEC` | `900` | rifiuta video più lunghi di 15 min |
+| `KEEP_AUDIO` | `0` | conserva i wav intermedi per debug |
+| `YT_DLP_UPDATE` | `0` | aggiorna yt-dlp all'avvio del worker |
+
+Vedi anche [`.env.example`](.env.example).
+
+## API
+
+```
+POST   /api/jobs            {"url": "https://youtu.be/..."} -> {id}
+GET    /api/jobs            lista job
+GET    /api/jobs/{id}       stato: queued|downloading|separating|transcribing|rendering|done|error
+GET    /api/jobs/{id}/tex   alphaTex generato
+GET    /api/jobs/{id}/midi  MIDI scaricabile
+DELETE /api/jobs/{id}       elimina job e file
+```
 
 ## Sicurezza
 
-- Nessuna chiave nel codice o nella repo: solo variabili d'ambiente (`MODAL_TOKEN_ID`,
-  `MODAL_TOKEN_SECRET`)
-- `.env` è in `.gitignore`; in repo c'è solo `.env.example` con placeholder
-- Se un token è stato incollato in chat o altrove, **revocalo** su
-  [modal.com/settings](https://modal.com/settings) e genera un nuovo token
+- **Nessuna chiave è presente nel repository**: i token Modal vivono solo
+  nelle variabili d'ambiente di Portainer (o in un `.env` locale, che è in
+  `.gitignore`). Il token GitHub usato per il push non è salvato nel repo.
+- Il GitHub token con scope `workflow` ha generato la build automatica;
+  ruotalo se condiviso.
 
-## Licenze
+## Note sui modelli di trascrizione
 
-Codice progetto: MIT. Componenti di terze parti elencati in `LICENSE`
-(alphaTab MPL-2.0, Basic Pitch Apache-2.0, checkpoint UVR/MSST con rispettive licenze).
+- **Basic Pitch** (Spotify, Apache-2.0): scelto per il percorso CPU — leggero,
+  robusto, ottimo su chitarra isolata.
+- **Demucs `htdemucs_6s`**: unico Demucs con stem chitarra dedicato.
+- State of the art 2024–25 (upgrade futuri):
+  - **YourMT3+** (2024): trascrizione multi-strumento, ibrido MT3/PerceiverTF;
+  - **MIDI-to-Tab / Fretting-Transformer** (2024–25): MIDI → tablatura con
+    diteggiatura realistica via Transformer — sostituibile al posto di `tex.py`.
+- Il trascrittore Modal (`modal_app.py`) è isolato: puoi aggiornarlo a
+  YourMT3+ senza toccare lo stack.
+
+## Troubleshooting
+
+| Problema | Rimedio |
+|----------|---------|
+| `Sign in to confirm you're not a bot` | aggiorna yt-dlp: `YT_DLP_UPDATE=1` (o `docker exec -it <worker> pip install -U yt-dlp`) |
+| Worker OOM durante Demucs | riduci a `DEMUCS_ENABLED=0`, oppure usa Modal (GPU), oppure più RAM |
+| Video lenti/age-restricted | yt-dlp con cookies: personalizza `download_audio()` in `worker/pipeline.py` |
+| Nessun suono nel player | soundfont servita da `/soundfont/sonivox.sf2`; verifica col bundle nginx |
+| Video più lunghi di 15 min | aumenta `YT_MAX_DURATION_SEC` (i tempi si allungano molto) |
+
+## Licenze dei bundle
+
+- [alphaTab](https://github.com/coderline/alphaTab) — MPL-2.0 (vendored `alphaTab.min.js` + `sonivox.sf2`)
+- Demucs (MIT) · Basic Pitch (Apache-2.0) · yt-dlp (Unlicense)

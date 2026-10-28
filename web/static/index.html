@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Autotabber — YouTube → tab</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1><span class="logo">🎸</span> Autotabber</h1>
+      <p class="sub">Incolla un link YouTube e ottieni la tablatura, suonabile nel browser.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="new-job" class="card">
+      <form id="form" autocomplete="off">
+        <input id="url" type="text" inputmode="url"
+               placeholder="https://www.youtube.com/watch?v=…"
+               spellcheck="false">
+        <button type="submit" id="btn-go">Genera tab</button>
+      </form>
+      <div id="form-msg" class="msg" hidden></div>
+    </section>
+
+    <section id="jobs">
+      <h2>I tuoi tab</h2>
+      <div id="job-list" class="grid"></div>
+      <div id="empty" class="empty">Nessun tab ancora. Generane uno! ▶</div>
+    </section>
+  </main>
+
+  <!-- Player a schermo intero -->
+  <div id="player-view" class="hidden">
+    <div class="player-head wrap">
+      <button id="btn-back" class="ghost">← Torna</button>
+      <div class="pv-meta">
+        <h2 id="pv-title"></h2>
+        <div id="pv-artist" class="muted"></div>
+      </div>
+      <div class="controls">
+        <button id="btn-play" class="primary">▶ Play</button>
+        <button id="btn-stop" class="ghost">⏹ Stop</button>
+        <select id="speed" title="Velocità di riproduzione">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+        </select>
+        <a id="dl-midi" class="ghost btn-link" download="autotabber.mid">MIDI</a>
+        <a id="dl-gp5" class="ghost btn-link" download="autotabber.gp5" hidden>Guitar Pro</a>
+        <a id="dl-tex" class="ghost btn-link" download="autotabber.alphatex" target="_blank">alphaTex</a>
+      </div>
+    </div>
+    <div id="pv-status" class="wrap muted"></div>
+    <div id="viewport">
+      <div id="alphaTab"></div>
+    </div>
+  </div>
+
+  <script src="/vendor/alphatab.min.js"></script>
+  <script>
+    // fallback CDN se il vendoring non fosse disponibile
+    if (!window.alphaTab) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alphaTab.min.js"><\/script>');
+    }
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>

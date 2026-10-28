@@ -1,25 +1,21 @@
-# --- secrets / local config ---
+# SEGRETI — mai committare
 .env
-*.env
+.env.*
 !.env.example
+
+# dati runtime / cache
+data/
+*.wav
+*.mid
+!web/static/soundfont/sonivox.sf2
 
 # python
 __pycache__/
-*.py[cod]
+*.pyc
 .venv/
-venv/
 
-# jobs data
-data/
-
-# modal local state (tokens live in ~/.modal.toml, but be safe)
-.modal/
-
-# editor / OS
+# node / editor / OS
+node_modules/
 .DS_Store
 .idea/
 .vscode/
-
-# never allow keys to leak
-*token*
-!*token*example*
