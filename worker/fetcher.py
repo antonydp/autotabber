@@ -198,7 +198,10 @@ def _download_stream(url: str, dest: Path) -> None:
     max_bytes = DOWNLOAD_MAX_MB * 1024 * 1024
     got = 0
     with requests.get(url, stream=True, headers=UA, timeout=(15, 120)) as r:
-        r.raise_for_status()
+        ctype = r.headers.get("content-type", "?")
+        clen = r.headers.get("content-length", "?")
+        if r.status_code >= 400:
+            raise RuntimeError(f"HTTP {r.status_code} (type={ctype})")
         with open(dest, "wb") as fh:
             for chunk in r.iter_content(chunk_size=256 * 1024):
                 if not chunk:
@@ -211,7 +214,8 @@ def _download_stream(url: str, dest: Path) -> None:
                     )
                 fh.write(chunk)
     if got == 0:
-        raise RuntimeError("download vuoto")
+        # es. tunnel 200 con corpo vuoto: accade a volte, transitorio
+        raise RuntimeError(f"risposta vuota (type={ctype}, length={clen})")
 
 
 # --------------------------------------------------------------------------
@@ -283,26 +287,34 @@ def download_audio(url: str, d: Path) -> dict:
         log.info("download diretto: %s", url)
         _download_stream(url, src)
     else:
-        media_url = None
-        tried: list = []
-        for api in _instance_candidates():
-            try:
-                log.info("cobalt: provo %s", api)
-                resp = _cobalt_resolve(api, url)
-                media_url = resp["url"]
-                filename_hint = resp.get("filename") or ""
-                log.info("cobalt: ok via %s", api)
+        candidates = _instance_candidates()
+        errors: list = []
+        done = False
+        # DUE passate: i tunnel a volte rispondono 200 con corpo vuoto
+        # (transitorio, capita anche alle istanze sane): a ogni passata
+        # si ottiene un tunnel URL fresco dalla stessa istanza
+        for pass_n in (1, 2):
+            for api in candidates:
+                try:
+                    log.info("cobalt: provo %s (passata %d)", api, pass_n)
+                    resp = _cobalt_resolve(api, url)
+                    _download_stream(resp["url"], src)
+                    filename_hint = resp.get("filename") or ""
+                    log.info("cobalt: audio scaricato via %s", api)
+                    done = True
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{api} ({exc})")
+                    log.warning("cobalt %s fallito: %s", api, exc)
+            if done:
                 break
-            except Exception as exc:  # noqa: BLE001
-                tried.append(api)
-                log.warning("cobalt %s fallito: %s", api, exc)
-        if not media_url:
+        if not done:
             raise RuntimeError(
-                "nessuna istanza Cobalt ha potuto processare questo link "
-                f"(provate: {', '.join(tried) or 'nessuna'}). Puoi indicare "
-                "istanze tue in COBALT_API_URLS"
+                "nessuna istanza Cobalt ha potuto scaricare questo link "
+                f"({len(errors)} tentativi). Ultimi errori: "
+                + "; ".join(errors[-3:])
+                + ". Puoi indicare istanze tue in COBALT_API_URLS"
             )
-        _download_stream(media_url, src)
 
     _ffmpeg_to_wav(src, d / "audio.wav")
 
