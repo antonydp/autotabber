@@ -50,6 +50,13 @@ services:
       timeout: 10s
       retries: 5
 
+  # Server PO-token (anti-bot YouTube 2025+). Solo rete interna: MAI
+  # pubblicare porte (server non autenticato).
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
+    pull_policy: always
+    restart: unless-stopped
+
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest
     pull_policy: always
@@ -63,6 +70,8 @@ services:
       YT_DLP_UPDATE: ${YT_DLP_UPDATE:-0}
       YT_COOKIES_FILE: ${YT_COOKIES_FILE:-}
       YT_PLAYER_CLIENT: ${YT_PLAYER_CLIENT:-}
+      YT_POT_PROVIDER_URL: ${YT_POT_PROVIDER_URL:-}
+      YT_IPV4: ${YT_IPV4:-0}
       YT_PROXY: ${YT_PROXY:-}
       MODAL_ENABLED: ${MODAL_ENABLED:-0}
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
@@ -75,6 +84,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      bgutil:
+        condition: service_started
     restart: unless-stopped
 
   web:

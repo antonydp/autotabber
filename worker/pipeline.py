@@ -75,6 +75,20 @@ def download_audio(url: str, d: Path) -> dict:
     if client:
         opts["extractor_args"] = {"youtube": {"player_client": [client]}}
         log.info("yt-dlp: player_client=%s", client)
+    # YT_POT_PROVIDER_URL: server PO-token bgutil (es. http://bgutil:4416).
+    # Dal 2025-26 YouTube pretende un Proof-of-Origin token: da IP
+    # datacenter i cookie da soli non bastano piu.
+    pot_url = os.getenv("YT_POT_PROVIDER_URL", "").strip()
+    if pot_url:
+        opts.setdefault("extractor_args", {})["youtubepot-bgutilhttp"] = {
+            "base_url": pot_url
+        }
+        log.info("yt-dlp: PO token provider %s", pot_url)
+    # YT_IPV4=1: forza IPv4 (YouTube punisce l'intero /64 IPv6 se un
+    # vicino e' stato flaggato)
+    if os.getenv("YT_IPV4", "0") == "1":
+        opts["source_address"] = "0.0.0.0"
+        log.info("yt-dlp: forzo IPv4")
     # YT_PROXY: proxy HTTP/SOCKS per uscire con un IP non-datacenter
     proxy = os.getenv("YT_PROXY", "").strip()
     if proxy:
