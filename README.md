@@ -1,13 +1,19 @@
 # 🎸 Autotabber
 
-**Self-hosted, pronto per Portainer.** Incolla un link YouTube e ottieni una
-tablatura chitarra con diteggiatura, visualizzata e **suonabile nel browser**
-(grazie ad alphaTab), senza dipendenze da servizi a pagamento.
+**Self-hosted, pronto per Portainer.** Incolla il link di un brano e ottieni
+una tablatura chitarra con diteggiatura, visualizzata e **suonabile nel
+browser** (grazie ad alphaTab), senza dipendenze da servizi a pagamento.
+
+Il download **non parla mai con YouTube diretto**: il link viene risolto
+tramite istanze [Cobalt](https://github.com/imputnet/cobalt) comunitarie,
+che scaricano con i loro IP e consegnano il file audio già pronto. Così
+niente cookie, PO-token o blocchi "confirm you're not a bot" anche su
+VPS/datacenter. Sono accettati anche file audio diretti (.mp3/.wav/…).
 
 ```
-YouTube ──yt-dlp──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
-        ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
-        ──alphaTab nel browser──► tab suonabile ▶
+link ──istanze Cobalt──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
+     ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
+     ──alphaTab nel browser──► tab suonabile ▶
 ```
 
 ## Servizi dello stack
@@ -16,7 +22,7 @@ YouTube ──yt-dlp──► audio.wav ──Demucs (htdemucs_6s)──► stem
 |----------|----------|-------|
 | `web` | nginx + alphaTab (vendored) | UI + player tab, proxy `/api` |
 | `api` | FastAPI | crea/consulta i job |
-| `worker` | Python + torch CPU + Demucs + Basic Pitch + yt-dlp | pipeline pesante |
+| `worker` | Python + torch CPU + Demucs + Basic Pitch | pipeline pesante, download via Cobalt |
 | `redis` | Redis 7 | coda job (RQ) + metadati |
 
 Le immagini possono essere pubblicate automaticamente su
@@ -96,9 +102,11 @@ In caso di errore Modal il worker ricade automaticamente su Basic Pitch locale.
 | `MODAL_APP` / `MODAL_FN` | `autotabber` / `transcribe` | funzione remota |
 | `DEMUCS_ENABLED` | `1` | separazione stems (0 = trascrivi l'audio intero) |
 | `DEMUCS_MODEL` | `htdemucs_6s` | modello Demucs (6 stems: include la chitarra) |
-| `YT_MAX_DURATION_SEC` | `900` | rifiuta video più lunghi di 15 min |
+| `MAX_DURATION_SEC` | `900` | rifiuta brani più lunghi di 15 min |
 | `KEEP_AUDIO` | `0` | conserva i wav intermedi per debug |
-| `YT_DLP_UPDATE` | `0` | aggiorna yt-dlp all'avvio del worker |
+| `COBALT_API_URLS` | *(vuoto)* | istanze Cobalt preferite, separate da virgola; vuoto = lista pubblica dinamica + fallback automatico |
+| `DOWNLOAD_MAX_MB` | `300` | tetto massimo del file audio scaricato |
+| `COBALT_MAX_TRIES` | `6` | quante istanze provare in cascata |
 
 Vedi anche [`.env.example`](.env.example).
 
@@ -138,13 +146,13 @@ DELETE /api/jobs/{id}       elimina job e file
 
 | Problema | Rimedio |
 |----------|---------|
-| `Sign in to confirm you're not a bot` | aggiorna yt-dlp: `YT_DLP_UPDATE=1` (o `docker exec -it <worker> pip install -U yt-dlp`) |
+| Tutte le istanze Cobalt falliscono | indica una tua istanza (o una che conosci) in `COBALT_API_URLS` — es. `https://la-tua-istanza.example` |
 | Worker OOM durante Demucs | riduci a `DEMUCS_ENABLED=0`, oppure usa Modal (GPU), oppure più RAM |
-| Video lenti/age-restricted | yt-dlp con cookies: personalizza `download_audio()` in `worker/pipeline.py` |
 | Nessun suono nel player | soundfont servita da `/soundfont/sonivox.sf2`; verifica col bundle nginx |
-| Video più lunghi di 15 min | aumenta `YT_MAX_DURATION_SEC` (i tempi si allungano molto) |
+| Brani più lunghi di 15 min | aumenta `MAX_DURATION_SEC` (i tempi si allungano molto) |
+| File audio molto grandi | aumenta `DOWNLOAD_MAX_MB` |
 
 ## Licenze dei bundle
 
 - [alphaTab](https://github.com/coderline/alphaTab) — MPL-2.0 (vendored `alphaTab.min.js` + `sonivox.sf2`)
-- Demucs (MIT) · Basic Pitch (Apache-2.0) · yt-dlp (Unlicense)
+- Demucs (MIT) · Basic Pitch (Apache-2.0) · [Cobalt](https://github.com/imputnet/cobalt) (AGPL-3.0, usato via API pubblica delle istanze)

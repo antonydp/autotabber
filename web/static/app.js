@@ -113,8 +113,8 @@ function showMsg(text, kind) {
 $("#form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const url = $("#url").value.trim();
-  if (!/youtube\.com\/(watch|shorts|live|embed)|youtu\.be\//.test(url)) {
-    showMsg("Inserisci un link YouTube valido.", "error");
+  if (!/^https?:\/\/.+/i.test(url)) {
+    showMsg("Inserisci un URL valido (https://…).", "error");
     return;
   }
   const btn = $("#btn-go");

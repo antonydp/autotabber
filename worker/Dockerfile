@@ -16,15 +16,6 @@ RUN pip install --no-cache-dir torch==2.5.1 torchaudio==2.5.1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Deno: runtime JS richiesto da yt-dlp (2026) per risolvere le challenge
-# BotGuard di YouTube.curl/unzip solo qui, DOPO i layer pesanti:
-# cosi' torch/TF restano in cache e la build resta veloce
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl unzip ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
-    && deno --version
-
-COPY worker.py pipeline.py transcribe.py tex.py gp5.py ./
+COPY worker.py pipeline.py transcribe.py tex.py gp5.py fetcher.py ./
 
 CMD ["python", "worker.py"]

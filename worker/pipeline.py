@@ -1,4 +1,4 @@
-"""Pipeline: YouTube URL -> stem chitarra -> MIDI -> alphaTex."""
+"""Pipeline: URL -> audio (via Cobalt) -> stem chitarra -> MIDI -> alphaTex."""
 
 import json
 import logging
@@ -11,6 +11,8 @@ from pathlib import Path
 
 import redis
 
+from fetcher import download_audio
+
 log = logging.getLogger("autotabber.pipeline")
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -19,7 +21,7 @@ logging.basicConfig(
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
-MAX_DURATION = int(os.getenv("YT_MAX_DURATION_SEC", "900"))
+MAX_DURATION = int(os.getenv("MAX_DURATION_SEC") or os.getenv("YT_MAX_DURATION_SEC") or 900)
 DEMUCS_ENABLED = os.getenv("DEMUCS_ENABLED", "1") == "1"
 DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "htdemucs_6s")
 KEEP_AUDIO = os.getenv("KEEP_AUDIO", "0") == "1"
@@ -43,68 +45,9 @@ def _stage(job_id: str, stage: str) -> None:
     _set(job_id, stage=stage, status=stage, progress=str(STAGE_PROGRESS.get(stage, 0)))
 
 
-def download_audio(url: str, d: Path) -> dict:
-    import yt_dlp
-
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": str(d / "source.%(ext)s"),
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
-        ],
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-    }
-
-    # --- Anti-bot YouTube (tutti opzionali, configurabili via env) ---
-    # YT_COOKIES_FILE: file cookies Netscape esportato dal browser
-    # (necessario da IP datacenter: "Sign in to confirm you're not a bot")
-    cookies = os.getenv("YT_COOKIES_FILE", "").strip()
-    if cookies:
-        if Path(cookies).is_file():
-            opts["cookiefile"] = cookies
-            log.info("yt-dlp: cookie da %s", cookies)
-        else:
-            log.warning("YT_COOKIES_FILE=%s non trovato, procedo senza", cookies)
-    # YT_PLAYER_CLIENT: client alternativo (es. tv_simply, android_vr) che
-    # a volte aggira il bot-check senza cookie
-    client = os.getenv("YT_PLAYER_CLIENT", "").strip()
-    if client:
-        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
-        log.info("yt-dlp: player_client=%s", client)
-    # YT_POT_PROVIDER_URL: server PO-token bgutil (es. http://bgutil:4416).
-    # Dal 2025-26 YouTube pretende un Proof-of-Origin token: da IP
-    # datacenter i cookie da soli non bastano piu.
-    pot_url = os.getenv("YT_POT_PROVIDER_URL", "").strip()
-    if pot_url:
-        opts.setdefault("extractor_args", {})["youtubepot-bgutilhttp"] = {
-            "base_url": pot_url
-        }
-        log.info("yt-dlp: PO token provider %s", pot_url)
-    # YT_IPV4=1: forza IPv4 (YouTube punisce l'intero /64 IPv6 se un
-    # vicino e' stato flaggato)
-    if os.getenv("YT_IPV4", "0") == "1":
-        opts["source_address"] = "0.0.0.0"
-        log.info("yt-dlp: forzo IPv4")
-    # YT_PROXY: proxy HTTP/SOCKS per uscire con un IP non-datacenter
-    proxy = os.getenv("YT_PROXY", "").strip()
-    if proxy:
-        opts["proxy"] = proxy
-        log.info("yt-dlp: uso proxy %s", proxy.rsplit("://", 1)[0] + "://***")
-
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-    if info.get("_type") == "playlist":
-        info = (info.get("entries") or [{}])[0]
-    return {
-        "title": info.get("title"),
-        "artist": info.get("uploader") or info.get("channel"),
-        "duration": info.get("duration"),
-        "webpage_url": info.get("webpage_url") or url,
-    }
+# Il download non passa piu' da YouTube diretto: la risoluzione avviene
+# tramite istanze Cobalt comunitarie (vedi fetcher.py). Niente cookies,
+# PO token o client alternativi.
 
 
 def separate_guitar(audio: Path, d: Path) -> Path:
@@ -174,8 +117,8 @@ def run_job(job_id: str) -> None:
         )
         if meta.get("duration") and meta["duration"] > MAX_DURATION:
             raise RuntimeError(
-                f"Video troppo lungo ({int(meta['duration'])}s > {MAX_DURATION}s): "
-                "aumenta YT_MAX_DURATION_SEC se serve"
+                f"Brano troppo lungo ({int(meta['duration'])}s > {MAX_DURATION}s): "
+                "aumenta MAX_DURATION_SEC se serve"
             )
         audio = d / "audio.wav"
         if not audio.exists():
@@ -213,7 +156,7 @@ def run_job(job_id: str) -> None:
         _set(job_id, gp5=gp5_flag)
 
         if not KEEP_AUDIO:
-            for name in ("audio.wav", "guitar.wav", "source.webm", "source.m4a"):
+            for name in ("audio.wav", "guitar.wav", "source.audio"):
                 p = d / name
                 if p.exists():
                     p.unlink()

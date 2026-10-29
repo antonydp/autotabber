@@ -1,6 +1,8 @@
 # ============================================================
 #  Autotabber — stack Docker / Portainer (build ibrida)
-#  YouTube  ->  chitarra tab suonabile (Demucs + Basic Pitch + alphaTab)
+#  Link brano  ->  chitarra tab suonabile (Demucs + Basic Pitch + alphaTab)
+#  Il download passa da istanze Cobalt comunitarie: il server non
+#  parla mai con YouTube diretto (niente cookie/PO-token).
 #
 #  Ogni servizio ha SIA image: (ghcr.io) SIA build: — quindi:
 #   - Portainer -> Stacks -> Add stack -> Repository
@@ -48,10 +50,8 @@ services:
       timeout: 10s
       retries: 5
 
-  # Server PO-token (anti-bot YouTube). Rete interna: nessuna porta pubblicata.
-  bgutil:
-    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
-    restart: unless-stopped
+  # (rimosso il servizio bgutil/PO-token: non serve piu', il download
+  #  avviene tramite istanze Cobalt comunitarie)
 
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest
@@ -62,13 +62,11 @@ services:
       DEMUCS_ENABLED: ${DEMUCS_ENABLED:-1}
       DEMUCS_MODEL: ${DEMUCS_MODEL:-htdemucs_6s}
       KEEP_AUDIO: ${KEEP_AUDIO:-0}
-      YT_MAX_DURATION_SEC: ${YT_MAX_DURATION_SEC:-900}
-      YT_DLP_UPDATE: ${YT_DLP_UPDATE:-0}
-      YT_COOKIES_FILE: ${YT_COOKIES_FILE:-}
-      YT_PLAYER_CLIENT: ${YT_PLAYER_CLIENT:-}
-      YT_POT_PROVIDER_URL: ${YT_POT_PROVIDER_URL:-}
-      YT_IPV4: ${YT_IPV4:-0}
-      YT_PROXY: ${YT_PROXY:-}
+      MAX_DURATION_SEC: ${MAX_DURATION_SEC:-900}
+      # istanze Cobalt preferite, separate da virgola (opzionale:
+      # es. una tua istanza self-hosted); vuoto = lista pubblica dinamica
+      COBALT_API_URLS: ${COBALT_API_URLS:-}
+      DOWNLOAD_MAX_MB: ${DOWNLOAD_MAX_MB:-300}
       MODAL_ENABLED: ${MODAL_ENABLED:-0}
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
       MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
@@ -80,8 +78,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      bgutil:
-        condition: service_started
     restart: unless-stopped
 
   web:

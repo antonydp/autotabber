@@ -1,4 +1,10 @@
-"""Autotabber API — orchestrazione job YouTube -> tab."""
+"""Autotabber API — orchestrazione job URL -> tab.
+
+Il download NON passa da YouTube diretto: il worker risolve il link
+tramite istanze Cobalt comunitarie (vedi worker/fetcher.py). Sono
+accettati link YouTube/SoundCloud e simili supportati da Cobalt, oltre
+a URL di file audio diretti (.mp3/.wav/…).
+"""
 
 import json
 import os
@@ -32,9 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-YT_RE = re.compile(
-    r"(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/|embed/)|youtu\.be/)"
-)
+URL_RE = re.compile(r"^https?://\S+$", re.I)
 
 
 class JobIn(BaseModel):
@@ -57,8 +61,12 @@ def health():
 @app.post("/api/jobs", status_code=201)
 def create_job(body: JobIn):
     url = body.url.strip()
-    if not YT_RE.search(url):
-        raise HTTPException(status_code=400, detail="URL YouTube non valido")
+    if not URL_RE.match(url):
+        raise HTTPException(
+            status_code=400,
+            detail="URL non valido: usa un link http/https "
+                   "(YouTube, SoundCloud, file audio diretto…)",
+        )
     jid = uuid.uuid4().hex[:12]
     r_h.hset(
         f"job:{jid}",
