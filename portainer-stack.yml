@@ -1,8 +1,8 @@
 # ============================================================
 #  Autotabber — stack Portainer "solo immagini" (web editor)
 #
-#  Download via istanza Cobalt self-hosted con sessione YouTube bgutil:
-#  il worker non parla mai direttamente con YouTube.
+#  Download via istanza Cobalt self-hosted con sessione YouTube bgutil
+#  (PO token) + cookies: il worker non parla mai direttamente con YouTube.
 #  Usalo quando le immagini GHCR sono già pubblicate dal workflow
 #  GitHub Actions (attivato in .github/workflows/docker.yml):
 #    ghcr.io/antonydp/autotabber-{api,worker,web}:latest
@@ -84,12 +84,16 @@ services:
       API_URL: "http://cobalt:9000/"
       # cobalt fa POST <questo URL>/get_pot: protocollo bgutil
       YOUTUBE_SESSION_SERVER: "http://yt-session:4416"
-      # Per i video tosti (age-restricted ecc.): metti il tuo cookies.json
-      # nel volume (docker cp <file> <volume-app-data>:/cobalt-cookies.json)
-      # e decommenta COOKIE_PATH + volumes. Formato: {"youtube": ["NOMEC=val; ..."]}
-      # COOKIE_PATH: "/data/cobalt-cookies.json"
-    # volumes:
-    #   - app-data:/data
+      # Cookies YouTube: su IP datacenter YouTube risponde "Sign in to
+      # confirm you're not a bot"; PO token + cookies insieme e' il
+      # bypass ufficiale. Il file vive nel volume app-data (sopravvive
+      # ai re-deploy). Se manca, cobalt parte comunque (solo un warning):
+      #   sudo docker cp yt-cobalt-cookies.json <worker>:/data/cobalt-cookies.json
+      #   sudo docker restart <cobalt>
+      # Formato: {"youtube": ["NOMEC=val; NOME2=val2; ..."]}
+      COOKIE_PATH: "/data/cobalt-cookies.json"
+    volumes:
+      - app-data:/data
     depends_on:
       yt-session:
         condition: service_healthy
