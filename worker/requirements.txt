@@ -11,5 +11,3 @@ modal>=0.73
 numpy<2
 # setuptools>=84 ha rimosso pkg_resources, richiesto da resampy/basic-pitch
 setuptools<81
-# provider PO-token per yt-dlp (anti-bot YouTube 2025+)
-bgutil-ytdlp-pot-provider==2.0.2
