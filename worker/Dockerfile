@@ -3,7 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl unzip ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,8 +17,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Deno: runtime JS richiesto da yt-dlp (2026) per risolvere le challenge
-# BotGuard di YouTube (dopo i layer pip: resta in cache, build veloce)
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+# BotGuard di YouTube.curl/unzip solo qui, DOPO i layer pesanti:
+# cosi' torch/TF restano in cache e la build resta veloce
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && deno --version
 
 COPY worker.py pipeline.py transcribe.py tex.py gp5.py ./
