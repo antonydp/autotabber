@@ -1,8 +1,8 @@
 # ============================================================
 #  Autotabber — stack Portainer "solo immagini" (web editor)
 #
-#  Download via istanze Cobalt comunitarie: il server non parla mai
-#  con YouTube diretto (niente cookie, PO-token o bgutil).
+#  Download via istanza Cobalt self-hosted con sessione YouTube bgutil:
+#  il worker non parla mai direttamente con YouTube.
 #  Usalo quando le immagini GHCR sono già pubblicate dal workflow
 #  GitHub Actions (attivato in .github/workflows/docker.yml):
 #    ghcr.io/antonydp/autotabber-{api,worker,web}:latest
