@@ -1,19 +1,16 @@
 # ============================================================
 #  Autotabber — stack Portainer "solo immagini" (web editor)
 #
-#  Download via istanza Cobalt self-hosted con sessione YouTube bgutil
-#  (PO token) + cookies: il worker non parla mai direttamente con YouTube.
-#  Usalo quando le immagini GHCR sono già pubblicate dal workflow
-#  GitHub Actions (attivato in .github/workflows/docker.yml):
+#  Upload file -> tab suonabile (Demucs + Basic Pitch + alphaTab).
+#  Niente YouTube/Cobalt: l'utente carica il file audio/video dal
+#  browser e il worker processa il file locale.
+#
+#  Le immagini GHCR sono pubblicate dal workflow GitHub Actions
+#  (attivato in .github/workflows/docker.yml):
 #    ghcr.io/antonydp/autotabber-{api,worker,web}:latest
 #
 #  Deploy su Portainer:
-#    Stacks -> Add stack -> Web editor -> incolla questo file
-#    e aggiungi le variabili d'ambiente nella sezione
-#    "Environment variables" (MAI le chiavi dentro questo file!).
-#
-#  Deploy alternativo SENZA CI (Portainer clona e costruisce):
-#    Stacks -> Add stack -> Repository -> docker-compose.yml
+#    Stacks -> autotabber -> Editor -> incolla questo file -> Update
 #
 #  Suggerimento: se attivi Modal (MODAL_ENABLED=1), Demucs gira
 #  dentro Modal: imposta anche DEMUCS_ENABLED=0 per evitare la
@@ -40,6 +37,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
+      # limite di dimensione dei file caricati
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-300}
     volumes:
       - app-data:/data
     depends_on:
@@ -52,52 +51,6 @@ services:
       timeout: 10s
       retries: 5
 
-  # (la sessione YouTube per cobalt e' il servizio yt-session qui sotto)
-
-  # Sessione YouTube (PO token) via bgutil provider: BotGuard gira in una
-  # JS VM dentro Node, niente chromium. Il tag 1.3.2 e' FISSATO di proposito:
-  # da 2.0.0 il server esige Content-Type application/json su /get_pot,
-  # ma cobalt manda il POST senza header -> 415 -> sessione mai caricata.
-  yt-session:
-    image: brainicism/bgutil-ytdlp-pot-provider:1.3.2
-    pull_policy: always
-    init: true
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 10s
-      retries: 6
-      start_period: 30s
-
-  # Istanza Cobalt PRIVATA: e' lei che parla con YouTube (con la sessione
-  # generata qui accanto). Rete interna: nessuna porta pubblicata.
-  cobalt:
-    image: ghcr.io/imputnet/cobalt:11
-    pull_policy: always
-    init: true
-    read_only: true
-    restart: unless-stopped
-    environment:
-      # URL interna: i tunnel URL generati resteranno raggiungibili
-      # solo dalla rete docker (va bene, il worker e' qui dentro)
-      API_URL: "http://cobalt:9000/"
-      # cobalt fa POST <questo URL>/get_pot: protocollo bgutil
-      YOUTUBE_SESSION_SERVER: "http://yt-session:4416"
-      # Cookies YouTube: su IP datacenter YouTube risponde "Sign in to
-      # confirm you're not a bot"; PO token + cookies insieme e' il
-      # bypass ufficiale. Il file vive nel volume app-data (sopravvive
-      # ai re-deploy). Se manca, cobalt parte comunque (solo un warning):
-      #   sudo docker cp yt-cobalt-cookies.json <worker>:/data/cobalt-cookies.json
-      #   sudo docker restart <cobalt>
-      # Formato: {"youtube": ["NOMEC=val; NOME2=val2; ..."]}
-      COOKIE_PATH: "/data/cobalt-cookies.json"
-    volumes:
-      - app-data:/data
-    depends_on:
-      yt-session:
-        condition: service_healthy
-
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest
     pull_policy: always
@@ -108,10 +61,6 @@ services:
       DEMUCS_MODEL: ${DEMUCS_MODEL:-htdemucs_6s}
       KEEP_AUDIO: ${KEEP_AUDIO:-0}
       MAX_DURATION_SEC: ${MAX_DURATION_SEC:-900}
-      # di default usa la TUA istanza cobalt interna; il fetcher prova
-      # comunque le liste pubbliche come riserva
-      COBALT_API_URLS: ${COBALT_API_URLS:-http://cobalt:9000}
-      DOWNLOAD_MAX_MB: ${DOWNLOAD_MAX_MB:-300}
       MODAL_ENABLED: ${MODAL_ENABLED:-0}
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
       MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
@@ -123,8 +72,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      cobalt:
-        condition: service_started
     restart: unless-stopped
 
   web:

@@ -10,17 +10,19 @@
   <header>
     <div class="wrap">
       <h1><span class="logo">🎸</span> Autotabber</h1>
-      <p class="sub">Incolla un link (YouTube, SoundCloud, …) o un file audio diretto e ottieni la tablatura, suonabile nel browser.</p>
+      <p class="sub">Carica un file audio o video e ottieni la tablatura, suonabile nel browser.</p>
     </div>
   </header>
 
   <main class="wrap">
     <section id="new-job" class="card">
       <form id="form" autocomplete="off">
-        <input id="url" type="text" inputmode="url"
-               placeholder="https://www.youtube.com/watch?v=… o …/brano.mp3"
-               spellcheck="false">
-        <button type="submit" id="btn-go">Genera tab</button>
+        <label id="drop" for="file">
+          <input id="file" type="file" hidden
+                 accept=".mp3,.wav,.m4a,.m4b,.flac,.ogg,.oga,.opus,.aac,.wma,.webm,.mp4,audio/*,video/*">
+          <div id="drop-label">🎵 Trascina qui un file audio/video, oppure clicca per sceglierlo</div>
+        </label>
+        <button type="submit" id="btn-go" disabled>Genera tab</button>
       </form>
       <div id="form-msg" class="msg" hidden></div>
     </section>

@@ -1,48 +1,27 @@
 # 🎸 Autotabber
 
-**Self-hosted, pronto per Portainer.** Incolla il link di un brano e ottieni
-una tablatura chitarra con diteggiatura, visualizzata e **suonabile nel
-browser** (grazie ad alphaTab), senza dipendenze da servizi a pagamento.
+**Self-hosted, pronto per Portainer.** Carica un file audio (o un video da
+cui estrarre l'audio) e ottieni una tablatura chitarra con diteggiatura,
+visualizzata e **suonabile nel browser** (grazie ad alphaTab), senza
+dipendenze da servizi a pagamento.
 
-Il download gira con **Cobalt self-hosted nello stack**: il link viene
-risolto dalla tua istanza privata (`cobalt`), che parla con YouTube usando
-una sessione (PO token + visitor_data) generata da
-[yt-session-generator](https://github.com/imputnet/yt-session-generator)
-e rinnovata in automatico. Nessuna istanza pubblica, nessun rate limit
-condiviso. Sono accettati anche file audio diretti (.mp3/.wav/…).
-
-> Nota onesta: YouTube combatte il download da IP datacenter. La sessione
-> generata copre la maggior parte dei video; se qualche video resta
-> bloccato (age-restricted o contenuti protetti), si aggiungono i propri
-> cookie (vedi sotto) — è la configurazione raccomandata dalla community.
+Niente YouTube, niente proxy, niente blocchi anti-bot: il file lo carichi
+tu dal browser (drag & drop) e viene processato interamente nel tuo server.
+Formati accettati: `.mp3 .wav .m4a .flac .ogg .opus .aac .wma .webm .mp4`.
 
 ```
-link ──cobalt (self-hosted + sessione)──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
+file caricato ──ffmpeg──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
      ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
      ──alphaTab nel browser──► tab suonabile ▶
 ```
-
-### Cookie (opzionale, per i video tosti)
-
-1. Dal tuo browser, copia gli header cookie di `youtube.com` (estensione
-   tipo *Cookie-Editor* → Export → *Header string*)
-2. Crea `cookies.json`: `{"youtube": ["VISITOR_INFO1_LIVE=…; SID=…; …"]}`
-3. Copialo nel volume: `docker cp cookies.json <volume-app-data>:/cobalt-cookies.json`
-   (per trovare il volume: `docker volume ls | grep app-data`)
-4. Nello stack decommenta `COOKIE_PATH` e `volumes` nel servizio `cobalt`
-   e fai **Update stack**
-
-> I cookie sono sensibili: vivono solo nel volume Docker, mai nel repo.
 
 ## Servizi dello stack
 
 | Servizio | Immagine | Ruolo |
 |----------|----------|-------|
-| `web` | nginx + alphaTab (vendored) | UI + player tab, proxy `/api` |
-| `api` | FastAPI | crea/consulta i job |
+| `web` | nginx + alphaTab (vendored) | UI upload + player tab, proxy `/api` |
+| `api` | FastAPI | upload file + crea/consulta i job |
 | `worker` | Python + torch CPU + Demucs + Basic Pitch | pipeline pesante |
-| `cobalt` | Cobalt 11 (self-hosted) | risolve i link: parla con YouTube per noi |
-| `yt-session-generator` | imput (chromium) | genera PO token/visitor_data per cobalt |
 | `redis` | Redis 7 | coda job (RQ) + metadati |
 
 Le immagini possono essere pubblicate automaticamente su
@@ -55,7 +34,7 @@ le immagini in loco.
 - Docker / Portainer (CE va benissimo)
 - ~2 GB liberi su disco per l'immagine worker
 - **RAM: 6–8 GB liberi per il worker** (Demucs `htdemucs_6s` su CPU è affamato)
-- Connessione internet (YouTube + download modelli al primo avvio)
+- Connessione internet solo per scaricare i modelli al primo avvio
 
 ## Deploy su Portainer
 
@@ -72,9 +51,8 @@ le immagini in loco.
 
 ### Metodo 2 — Web editor (richiede immagini GHCR già pubblicate)
 
-1. Incolla `docker-compose.yml` in **Stacks → Add stack → Web editor**
-2. Aggiungi le environment variables → **Deploy**
-3. Le immagini vengono scaricate da GHCR (vedi "Abilitare la build
+1. Incolla `portainer-stack.yml` in **Stacks → autotabber → Editor → Update**
+2. Le immagini vengono scaricate da GHCR (vedi "Abilitare la build
    automatica" qui sotto)
 
 ### CLI (senza Portainer)
@@ -86,16 +64,11 @@ docker compose up -d --build
 
 ### Abilitare la build automatica (GHCR, opzionale)
 
-Il token usato per il push non ha scope `workflow`, quindi il workflow non è
-attivo. Per attivarlo:
-
-1. Crea un PAT GitHub con scope **repo + workflow**
-2. Sposta il file: `docs/workflow-docker.yml.disabled` →
-   `.github/workflows/docker.yml` e fai push con il nuovo token
-3. Ad ogni push su `main` Actions pubblica le tre immagini su GHCR
-4. Rendi pubblici i pacchetti su `https://github.com/antonydp?tab=packages`
-   (*Package settings → Change visibility → Public*, una tantum): da quel
-   momento il Metodo 2 (Web editor) funziona senza build
+Il workflow GitHub Actions (`.github/workflows/docker.yml`) pubblica le tre
+immagini su GHCR ad ogni push su `main`. Rendi pubblici i pacchetti su
+`https://github.com/antonydp?tab=packages` (*Package settings → Change
+visibility → Public*, una tantum): da quel momento il Metodo 2 (Web editor)
+funziona senza build.
 
 ## GPU opzionale con Modal
 
@@ -117,6 +90,7 @@ In caso di errore Modal il worker ricade automaticamente su Basic Pitch locale.
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
 | `WEB_PORT` | `8088` | porta web esposta |
+| `UPLOAD_MAX_MB` | `300` | tetto massimo del file caricato dal browser |
 | `MODAL_ENABLED` | `0` | `1` = usa GPU Modal se disponibile |
 | `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | — | credenziali Modal (mai committare) |
 | `MODAL_APP` / `MODAL_FN` | `autotabber` / `transcribe` | funzione remota |
@@ -124,18 +98,15 @@ In caso di errore Modal il worker ricade automaticamente su Basic Pitch locale.
 | `DEMUCS_MODEL` | `htdemucs_6s` | modello Demucs (6 stems: include la chitarra) |
 | `MAX_DURATION_SEC` | `900` | rifiuta brani più lunghi di 15 min |
 | `KEEP_AUDIO` | `0` | conserva i wav intermedi per debug |
-| `COBALT_API_URLS` | `http://cobalt:9000` | istanze Cobalt usate dal worker; il default è la tua istanza interna, puoi aggiungerne esterne come riserva |
-| `DOWNLOAD_MAX_MB` | `300` | tetto massimo del file audio scaricato |
-| `COBALT_MAX_TRIES` | `6` | quante istanze provare in cascata |
 
 Vedi anche [`.env.example`](.env.example).
 
 ## API
 
 ```
-POST   /api/jobs            {"url": "https://youtu.be/..."} -> {id}
+POST   /api/upload          multipart (campo "file") -> {id}
 GET    /api/jobs            lista job
-GET    /api/jobs/{id}       stato: queued|downloading|separating|transcribing|rendering|done|error
+GET    /api/jobs/{id}       stato: queued|preparing|separating|transcribing|rendering|done|error
 GET    /api/jobs/{id}/tex   alphaTex generato
 GET    /api/jobs/{id}/midi  MIDI scaricabile
 GET    /api/jobs/{id}/gp5   Guitar Pro 5 scaricabile (se generato)
@@ -147,8 +118,7 @@ DELETE /api/jobs/{id}       elimina job e file
 - **Nessuna chiave è presente nel repository**: i token Modal vivono solo
   nelle variabili d'ambiente di Portainer (o in un `.env` locale, che è in
   `.gitignore`). Il token GitHub usato per il push non è salvato nel repo.
-- Il GitHub token con scope `workflow` ha generato la build automatica;
-  ruotalo se condiviso.
+- I file caricati vivono solo nel volume Docker locale.
 
 ## Note sui modelli di trascrizione
 
@@ -166,13 +136,13 @@ DELETE /api/jobs/{id}       elimina job e file
 
 | Problema | Rimedio |
 |----------|---------|
-| Tutte le istanze Cobalt falliscono | verifica i log di `cobalt` e `yt-session-generator` (`docker logs`); per video age-restricted aggiungi i cookie (vedi sopra) |
+| Upload rifiutato (413) | alza `UPLOAD_MAX_MB` (api) e `client_max_body_size` in `web/nginx.conf` |
 | Worker OOM durante Demucs | riduci a `DEMUCS_ENABLED=0`, oppure usa Modal (GPU), oppure più RAM |
 | Nessun suono nel player | soundfont servita da `/soundfont/sonivox.sf2`; verifica col bundle nginx |
 | Brani più lunghi di 15 min | aumenta `MAX_DURATION_SEC` (i tempi si allungano molto) |
-| File audio molto grandi | aumenta `DOWNLOAD_MAX_MB` |
+| File molto grandi | aumenta `UPLOAD_MAX_MB` |
 
 ## Licenze dei bundle
 
 - [alphaTab](https://github.com/coderline/alphaTab) — MPL-2.0 (vendored `alphaTab.min.js` + `sonivox.sf2`)
-- Demucs (MIT) · Basic Pitch (Apache-2.0) · [Cobalt](https://github.com/imputnet/cobalt) (AGPL-3.0, usato via API pubblica delle istanze)
+- Demucs (MIT) · Basic Pitch (Apache-2.0)

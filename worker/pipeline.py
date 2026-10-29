@@ -1,4 +1,8 @@
-"""Pipeline: URL -> audio (via Cobalt) -> stem chitarra -> MIDI -> alphaTex."""
+"""Pipeline: file caricato -> audio.wav (ffmpeg) -> stem chitarra -> MIDI -> alphaTex.
+
+Niente YouTube/Cobalt: il file audio/video e' stato caricato dall'utente
+via POST /api/upload e sta nella cartella del job (source_file).
+"""
 
 import json
 import logging
@@ -10,8 +14,6 @@ import traceback
 from pathlib import Path
 
 import redis
-
-from fetcher import download_audio
 
 log = logging.getLogger("autotabber.pipeline")
 logging.basicConfig(
@@ -29,7 +31,7 @@ KEEP_AUDIO = os.getenv("KEEP_AUDIO", "0") == "1"
 r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 STAGE_PROGRESS = {
-    "downloading": 10,
+    "preparing": 10,
     "separating": 40,
     "transcribing": 70,
     "rendering": 90,
@@ -45,9 +47,31 @@ def _stage(job_id: str, stage: str) -> None:
     _set(job_id, stage=stage, status=stage, progress=str(STAGE_PROGRESS.get(stage, 0)))
 
 
-# Il download non passa piu' da YouTube diretto: la risoluzione avviene
-# tramite istanze Cobalt comunitarie (vedi fetcher.py). Niente cookies,
-# PO token o client alternativi.
+# Il file audio/video e' stato caricato dall'utente via /api/upload:
+# qui si estrae l'audio con ffmpeg e si prosegue con la pipeline.
+
+
+def _ffmpeg_to_wav(src: Path, dst: Path) -> None:
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(src), "-vn", "-acodec", "pcm_s16le", str(dst),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0 or not dst.exists():
+        tail = (proc.stderr or proc.stdout or "")[-400:]
+        raise RuntimeError(f"ffmpeg: {tail}")
+
+
+def _ffprobe_duration(path: Path):
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float(out.stdout.strip().splitlines()[0])
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def separate_guitar(audio: Path, d: Path) -> Path:
@@ -103,26 +127,30 @@ def load_notes(midi_path: Path) -> list:
 def run_job(job_id: str) -> None:
     d = DATA_DIR / "jobs" / job_id
     try:
-        url = r.hget(f"job:{job_id}", "url")
         d.mkdir(parents=True, exist_ok=True)
+        source = r.hget(f"job:{job_id}", "source_file")
+        title = r.hget(f"job:{job_id}", "title")
+        if not source:
+            raise RuntimeError("Nessun file caricato per questo job")
+        src = d / source
+        if not src.exists():
+            raise RuntimeError(f"File caricato non trovato: {source}")
+        meta = {"title": title or "Senza titolo", "artist": "", "duration": 0}
 
-        # 1) download audio
-        _stage(job_id, "downloading")
-        meta = download_audio(url, d)
-        _set(
-            job_id,
-            title=meta.get("title") or "Senza titolo",
-            artist=meta.get("artist") or "",
-            duration=str(int(meta.get("duration") or 0)),
-        )
-        if meta.get("duration") and meta["duration"] > MAX_DURATION:
+        # 1) estrazione audio -> wav (ffmpeg)
+        _stage(job_id, "preparing")
+        _ffmpeg_to_wav(src, d / "audio.wav")
+        duration = _ffprobe_duration(d / "audio.wav") or 0
+        if duration > MAX_DURATION:
             raise RuntimeError(
-                f"Brano troppo lungo ({int(meta['duration'])}s > {MAX_DURATION}s): "
+                f"Brano troppo lungo ({int(duration)}s > {MAX_DURATION}s): "
                 "aumenta MAX_DURATION_SEC se serve"
             )
+        meta["duration"] = duration
+        _set(job_id, duration=str(int(duration or 0)))
         audio = d / "audio.wav"
         if not audio.exists():
-            raise RuntimeError("Download audio fallito (audio.wav mancante)")
+            raise RuntimeError("Estrazione audio fallita (audio.wav mancante)")
 
         # 2) separazione stem chitarra
         _stage(job_id, "separating")
@@ -156,7 +184,7 @@ def run_job(job_id: str) -> None:
         _set(job_id, gp5=gp5_flag)
 
         if not KEEP_AUDIO:
-            for name in ("audio.wav", "guitar.wav", "source.audio"):
+            for name in ("audio.wav", "guitar.wav", "input.tmp"):
                 p = d / name
                 if p.exists():
                     p.unlink()

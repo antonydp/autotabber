@@ -7,7 +7,6 @@ pyguitarpro>=0.8
 rq==2.*
 redis==5.*
 modal>=0.73
-requests>=2.31
 numpy<2
 # setuptools>=84 ha rimosso pkg_resources, richiesto da resampy/basic-pitch
 setuptools<81

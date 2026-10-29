@@ -1,8 +1,8 @@
 # ============================================================
 #  Autotabber — stack Docker / Portainer (build ibrida)
-#  Link brano  ->  chitarra tab suonabile (Demucs + Basic Pitch + alphaTab)
-#  Il download passa da istanze Cobalt comunitarie: il server non
-#  parla mai con YouTube diretto (niente cookie/PO-token).
+#  Upload file  ->  chitarra tab suonabile (Demucs + Basic Pitch + alphaTab)
+#  Niente YouTube/Cobalt: il file audio/video viene caricato dal browser
+#  e processato in locale dal worker.
 #
 #  Ogni servizio ha SIA image: (ghcr.io) SIA build: — quindi:
 #   - Portainer -> Stacks -> Add stack -> Repository
@@ -38,6 +38,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
+      # limite di dimensione dei file caricati
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-300}
     volumes:
       - app-data:/data
     depends_on:
@@ -50,36 +52,6 @@ services:
       timeout: 10s
       retries: 5
 
-  # (nessun servizio bgutil: il download passa da Cobalt self-hosted)
-
-  # Sessione YouTube (PO token + visitor_data) generata in casa:
-  # chromium con browser automation, token rinnovato in automatico.
-  yt-session-generator:
-    image: ghcr.io/imputnet/yt-session-generator:webserver
-    pull_policy: always
-    init: true
-    restart: unless-stopped
-
-  # Istanza Cobalt PRIVATA: e' lei che parla con YouTube (con la sessione
-  # generata qui accanto). Rete interna: nessuna porta pubblicata.
-  cobalt:
-    image: ghcr.io/imputnet/cobalt:11
-    pull_policy: always
-    init: true
-    read_only: true
-    restart: unless-stopped
-    environment:
-      # URL interna: i tunnel URL generati resteranno raggiungibili
-      # solo dalla rete docker (va bene, il worker e' qui dentro)
-      API_URL: "http://cobalt:9000/"
-      YOUTUBE_SESSION_SERVER: "http://yt-session-generator:8080"
-      # Per i video tosti (age-restricted ecc.): metti il tuo cookies.json
-      # nel volume (docker cp <file> <volume-app-data>:/cobalt-cookies.json)
-      # e decommenta COOKIE_PATH + volumes. Formato: {"youtube": ["NOMEC=val; ..."]}
-      # COOKIE_PATH: "/data/cobalt-cookies.json"
-    # volumes:
-    #   - app-data:/data
-
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest
     build: ./worker
@@ -90,10 +62,6 @@ services:
       DEMUCS_MODEL: ${DEMUCS_MODEL:-htdemucs_6s}
       KEEP_AUDIO: ${KEEP_AUDIO:-0}
       MAX_DURATION_SEC: ${MAX_DURATION_SEC:-900}
-      # di default usa la TUA istanza cobalt interna; il fetcher prova
-      # comunque le liste pubbliche come riserva
-      COBALT_API_URLS: ${COBALT_API_URLS:-http://cobalt:9000}
-      DOWNLOAD_MAX_MB: ${DOWNLOAD_MAX_MB:-300}
       MODAL_ENABLED: ${MODAL_ENABLED:-0}
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
       MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
@@ -105,8 +73,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      cobalt:
-        condition: service_started
     restart: unless-stopped
 
   web:

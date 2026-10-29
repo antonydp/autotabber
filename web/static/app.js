@@ -5,7 +5,7 @@ const $ = (sel) => document.querySelector(sel);
 
 const STAGES_IT = {
   queued: "In coda",
-  downloading: "Download audio",
+  preparing: "Preparazione audio",
   separating: "Separazione stems",
   transcribing: "Trascrizione",
   rendering: "Rendering tab",
@@ -32,7 +32,7 @@ function fmtDur(sec) {
 }
 
 function isBusy(job) {
-  return ["queued", "downloading", "separating", "transcribing", "rendering"].includes(job.status);
+  return ["queued", "preparing", "separating", "transcribing", "rendering"].includes(job.status);
 }
 
 async function api(path, opts) {
@@ -71,7 +71,7 @@ function jobCard(job) {
     ${job.status === "error" ? '<div class="error-text"></div>' : ""}
   `;
 
-  el.querySelector(".title").textContent = job.title || job.url || job.id;
+  el.querySelector(".title").textContent = job.title || job.filename || job.id;
   el.querySelector(".artist").textContent =
     [job.artist, fmtDur(job.duration)].filter(Boolean).join(" · ");
   const chip = el.querySelector(".chip");
@@ -101,7 +101,12 @@ async function refreshJobs() {
   } catch (_) { /* noop */ }
 }
 
-/* ---------- creazione job ---------- */
+/* ---------- upload file ---------- */
+
+const ACCEPTED = [".mp3", ".wav", ".m4a", ".m4b", ".flac", ".ogg", ".oga",
+  ".opus", ".aac", ".wma", ".webm", ".mp4"];
+
+let pickedFile = null;
 
 function showMsg(text, kind) {
   const el = $("#form-msg");
@@ -110,30 +115,74 @@ function showMsg(text, kind) {
   el.textContent = text;
 }
 
+function setPicked(file) {
+  if (!file) return;
+  const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  if (!ACCEPTED.includes(ext)) {
+    showMsg(`Formato ${ext || "sconosciuto"} non supportato. Usa: ${ACCEPTED.join(", ")}`, "error");
+    return;
+  }
+  pickedFile = file;
+  $("#drop-label").textContent = `🎵 ${file.name} (${(file.size / 1048576).toFixed(1)} MB)`;
+  $("#drop").classList.add("picked");
+  $("#btn-go").disabled = false;
+  showMsg("", "info");
+  $("#form-msg").hidden = true;
+}
+
+$("#file").addEventListener("change", (ev) => setPicked(ev.target.files[0]));
+
+const dropEl = $("#drop");
+["dragenter", "dragover"].forEach((ev) =>
+  dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.add("over"); })
+);
+["dragleave", "drop"].forEach((ev) =>
+  dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.remove("over"); })
+);
+dropEl.addEventListener("drop", (e) => setPicked(e.dataTransfer.files[0]));
+
 $("#form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const url = $("#url").value.trim();
-  if (!/^https?:\/\/.+/i.test(url)) {
-    showMsg("Inserisci un URL valido (https://…).", "error");
+  if (!pickedFile) {
+    showMsg("Scegli prima un file audio/video.", "error");
     return;
   }
   const btn = $("#btn-go");
   btn.disabled = true;
-  showMsg("Job creato, il worker sta partendo…", "info");
-  try {
-    const j = await api("/api/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    $("#url").value = "";
-    showMsg(`Tab #${j.id} in coda: lo vedi comparire qui sotto.`, "info");
-    refreshJobs();
-  } catch (e) {
-    showMsg(e.message, "error");
-  } finally {
+
+  const fd = new FormData();
+  fd.append("file", pickedFile, pickedFile.name);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/upload");
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      showMsg(`Caricamento… ${pct}%`, "info");
+    }
+  };
+  xhr.onload = () => {
     btn.disabled = false;
-  }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const j = JSON.parse(xhr.responseText);
+      showMsg(`Tab #${j.id} in coda: lo vedi comparire qui sotto.`, "info");
+      pickedFile = null;
+      $("#file").value = "";
+      $("#drop-label").textContent = "🎵 Trascina qui un file audio/video, oppure clicca per sceglierlo";
+      $("#drop").classList.remove("picked");
+      refreshJobs();
+    } else {
+      let detail = xhr.statusText;
+      try { detail = JSON.parse(xhr.responseText).detail || detail; } catch (_) { /* noop */ }
+      showMsg(detail, "error");
+    }
+  };
+  xhr.onerror = () => {
+    btn.disabled = false;
+    showMsg("Errore di rete durante il caricamento.", "error");
+  };
+  showMsg("Caricamento… 0%", "info");
+  xhr.send(fd);
 });
 
 /* ---------- player alphaTab ---------- */
