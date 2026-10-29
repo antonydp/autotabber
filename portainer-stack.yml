@@ -61,6 +61,14 @@ services:
     pull_policy: always
     init: true
     restart: unless-stopped
+    healthcheck:
+      # chromium impiega qualche secondo a partire: senza questo check
+      # cobalt parte prima e logga un ECONNREFUSED innocuo all'avvio
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/token"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
 
   # Istanza Cobalt PRIVATA: e' lei che parla con YouTube (con la sessione
   # generata qui accanto). Rete interna: nessuna porta pubblicata.
@@ -81,6 +89,9 @@ services:
       # COOKIE_PATH: "/data/cobalt-cookies.json"
     # volumes:
     #   - app-data:/data
+    depends_on:
+      yt-session-generator:
+        condition: service_healthy
 
   worker:
     image: ghcr.io/antonydp/autotabber-worker:latest

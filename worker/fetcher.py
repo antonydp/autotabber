@@ -170,6 +170,13 @@ def _cobalt_resolve(api: str, url: str) -> dict:
         # meno carico per l'istanza; convertiamo noi in wav con ffmpeg
         "audioFormat": "best",
         "filenameStyle": "basic",
+        # CRITICO per le istanze self-hosted: in cobalt il download audio
+        # di default NON usa la sessione YouTube (PO token) — match.js
+        # sovrascrive quality a "1080" e la sessione scatta solo con
+        # quality > 1080 (cioe' solo con youtubeBetterAudio=true).
+        # Senza questo flag, da IP datacenter YouTube risponde
+        # "sign in to confirm you're not a bot" (error.api.youtube.login).
+        "youtubeBetterAudio": True,
     }
     # l'API v10 ESIGE Accept: application/json (sennò: error.api.header.accept)
     headers = {**UA, "Accept": "application/json"}
