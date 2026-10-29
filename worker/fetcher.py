@@ -52,8 +52,7 @@ LIST_URLS = [
 # riserva: piccola lista statica (verificata manualmente, può cambiare)
 STATIC_INSTANCES = [
     "https://co.otomir23.me",
-    "https://cobalt-api.kwiatekmiki.com",
-    "https://capi.oak.li",
+    "https://rue-cobalt.xenon.zone",
 ]
 
 # URL che punta direttamente a un file media -> niente Cobalt

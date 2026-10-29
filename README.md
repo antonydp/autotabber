@@ -4,17 +4,35 @@
 una tablatura chitarra con diteggiatura, visualizzata e **suonabile nel
 browser** (grazie ad alphaTab), senza dipendenze da servizi a pagamento.
 
-Il download **non parla mai con YouTube diretto**: il link viene risolto
-tramite istanze [Cobalt](https://github.com/imputnet/cobalt) comunitarie,
-che scaricano con i loro IP e consegnano il file audio già pronto. Così
-niente cookie, PO-token o blocchi "confirm you're not a bot" anche su
-VPS/datacenter. Sono accettati anche file audio diretti (.mp3/.wav/…).
+Il download gira con **Cobalt self-hosted nello stack**: il link viene
+risolto dalla tua istanza privata (`cobalt`), che parla con YouTube usando
+una sessione (PO token + visitor_data) generata da
+[yt-session-generator](https://github.com/imputnet/yt-session-generator)
+e rinnovata in automatico. Nessuna istanza pubblica, nessun rate limit
+condiviso. Sono accettati anche file audio diretti (.mp3/.wav/…).
+
+> Nota onesta: YouTube combatte il download da IP datacenter. La sessione
+> generata copre la maggior parte dei video; se qualche video resta
+> bloccato (age-restricted o contenuti protetti), si aggiungono i propri
+> cookie (vedi sotto) — è la configurazione raccomandata dalla community.
 
 ```
-link ──istanze Cobalt──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
+link ──cobalt (self-hosted + sessione)──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
      ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
      ──alphaTab nel browser──► tab suonabile ▶
 ```
+
+### Cookie (opzionale, per i video tosti)
+
+1. Dal tuo browser, copia gli header cookie di `youtube.com` (estensione
+   tipo *Cookie-Editor* → Export → *Header string*)
+2. Crea `cookies.json`: `{"youtube": ["VISITOR_INFO1_LIVE=…; SID=…; …"]}`
+3. Copialo nel volume: `docker cp cookies.json <volume-app-data>:/cobalt-cookies.json`
+   (per trovare il volume: `docker volume ls | grep app-data`)
+4. Nello stack decommenta `COOKIE_PATH` e `volumes` nel servizio `cobalt`
+   e fai **Update stack**
+
+> I cookie sono sensibili: vivono solo nel volume Docker, mai nel repo.
 
 ## Servizi dello stack
 
@@ -22,7 +40,9 @@ link ──istanze Cobalt──► audio.wav ──Demucs (htdemucs_6s)──►
 |----------|----------|-------|
 | `web` | nginx + alphaTab (vendored) | UI + player tab, proxy `/api` |
 | `api` | FastAPI | crea/consulta i job |
-| `worker` | Python + torch CPU + Demucs + Basic Pitch | pipeline pesante, download via Cobalt |
+| `worker` | Python + torch CPU + Demucs + Basic Pitch | pipeline pesante |
+| `cobalt` | Cobalt 11 (self-hosted) | risolve i link: parla con YouTube per noi |
+| `yt-session-generator` | imput (chromium) | genera PO token/visitor_data per cobalt |
 | `redis` | Redis 7 | coda job (RQ) + metadati |
 
 Le immagini possono essere pubblicate automaticamente su
@@ -104,7 +124,7 @@ In caso di errore Modal il worker ricade automaticamente su Basic Pitch locale.
 | `DEMUCS_MODEL` | `htdemucs_6s` | modello Demucs (6 stems: include la chitarra) |
 | `MAX_DURATION_SEC` | `900` | rifiuta brani più lunghi di 15 min |
 | `KEEP_AUDIO` | `0` | conserva i wav intermedi per debug |
-| `COBALT_API_URLS` | *(vuoto)* | istanze Cobalt preferite, separate da virgola; vuoto = lista pubblica dinamica + fallback automatico |
+| `COBALT_API_URLS` | `http://cobalt:9000` | istanze Cobalt usate dal worker; il default è la tua istanza interna, puoi aggiungerne esterne come riserva |
 | `DOWNLOAD_MAX_MB` | `300` | tetto massimo del file audio scaricato |
 | `COBALT_MAX_TRIES` | `6` | quante istanze provare in cascata |
 
@@ -146,7 +166,7 @@ DELETE /api/jobs/{id}       elimina job e file
 
 | Problema | Rimedio |
 |----------|---------|
-| Tutte le istanze Cobalt falliscono | indica una tua istanza (o una che conosci) in `COBALT_API_URLS` — es. `https://la-tua-istanza.example` |
+| Tutte le istanze Cobalt falliscono | verifica i log di `cobalt` e `yt-session-generator` (`docker logs`); per video age-restricted aggiungi i cookie (vedi sopra) |
 | Worker OOM durante Demucs | riduci a `DEMUCS_ENABLED=0`, oppure usa Modal (GPU), oppure più RAM |
 | Nessun suono nel player | soundfont servita da `/soundfont/sonivox.sf2`; verifica col bundle nginx |
 | Brani più lunghi di 15 min | aumenta `MAX_DURATION_SEC` (i tempi si allungano molto) |
