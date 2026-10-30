@@ -23,7 +23,7 @@ import redis
 import analysis
 import build_tracks
 import rhythm
-from transcribe import transcribe_file
+from transcribe import modal_full_separate, transcribe_file
 
 log = logging.getLogger("autotabber.pipeline")
 logging.basicConfig(
@@ -134,11 +134,17 @@ def process(d: Path, source_name: str, title: str, progress=None) -> dict:
     audio = d / "audio.wav"
 
     # 2) separazione stems + rilevamento strumenti
+    #    Modal attivo? tutto il lavoro pesante (Demucs GPU + Basic Pitch)
+    #    va su Modal in una chiamata; altrimenti Demucs CPU locale.
     progress("separating", 15)
     if DEMUCS_ENABLED:
-        stems = analysis.separate_all(audio, d, DEMUCS_MODEL)
+        stems = modal_full_separate(audio, d, DEMUCS_MODEL)
+        modal_ok = stems is not None
+        if not modal_ok:
+            stems = analysis.separate_all(audio, d, DEMUCS_MODEL)
         detection = analysis.detect_instruments(stems, audio)
     else:
+        modal_ok = False
         # niente separazione: tutto il mix su una traccia chitarra
         stems = {"other": audio}
         detection = {"other": {"present": True, "rel_db": 0.0, "abs_db": 0.0}}
@@ -164,7 +170,8 @@ def process(d: Path, source_name: str, title: str, progress=None) -> dict:
     for stem in present_melodic:
         progress("transcribing", 40 + int(35 * done / max(n_steps, 1)))
         midi_path = d / f"{stem}.mid"
-        transcribe_file(stems[stem], midi_path)
+        if not (modal_ok and midi_path.exists()):
+            transcribe_file(stems[stem], midi_path)
         notes = build_tracks.load_notes(midi_path)
         notes_for_rhythm.extend(notes)
         done += 1

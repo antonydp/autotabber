@@ -1,16 +1,24 @@
 """Autotabber su Modal — accelerazione GPU opzionale.
 
-Separa lo stem chitarra con Demucs (GPU) e trascrive con Basic Pitch,
-restituendo un MIDI. Il worker Docker chiama questa funzione quando
-MODAL_ENABLED=1 e le chiavi Modal sono presenti come variabili d'ambiente.
+UNA SOLA chiamata remota esegue tutto il lavoro pesante:
+  1. Demucs (htdemucs_6s, 6 stems) su GPU T4 — il passo che in CPU
+     locale richiede decine di minuti;
+  2. Basic Pitch su ogni stem melodico -> MIDI (voce, chitarra,
+     basso, piano, altro).
 
-Deploy (una tantum, dal PC/server):
-    export MODAL_TOKEN_ID=...      # mai committare questi valori
-    export MODAL_TOKEN_SECRET=...
+Al worker arrivano:
+  - i MIDI (piccoli, pronti per la costruzione delle tracce);
+  - gli stem ricompressi in mono/22 kHz (bastano per il rilevamento
+    dell'energia e per la trascrizione della batteria, che restano
+    in locale perche' sono leggere).
+
+Deploy (una tantum, dal PC o da qualsiasi macchina):
+    pip install modal
+    modal setup                     # oppure export MODAL_TOKEN_ID/SECRET
     modal deploy modal_app.py
 
 Test manuale:
-    modal run modal_app.py --path /percorso/brano.mp3
+    modal run modal_app.py --path /percorso/brano.wav --out-dir /tmp/out
 """
 
 import modal
@@ -34,6 +42,9 @@ image = (
 
 cache = modal.Volume.from_name("autotabber-cache", create_if_missing=True)
 
+MELODIC = ("vocals", "guitar", "bass", "piano", "other")
+ALL_STEMS = MELODIC + ("drums",)
+
 
 @app.function(
     image=image,
@@ -43,49 +54,80 @@ cache = modal.Volume.from_name("autotabber-cache", create_if_missing=True)
     volumes={"/cache": cache},
     env={"TORCH_HOME": "/cache/torch", "XDG_CACHE_HOME": "/cache"},
 )
-def transcribe(audio: bytes) -> bytes:
-    """audio (wav/mp3/...) -> MIDI bytes (stem chitarra trascritto)."""
+def separate_and_transcribe(audio: bytes, model: str = "htdemucs_6s") -> dict:
+    """Demucs GPU + Basic Pitch: tutto il lavoro pesante in una chiamata.
+
+    Input:  audio wav/mp3/flac... (bytes)
+    Output: {"stems": {nome: wav mono 22kHz}, "midi": {nome: midi bytes}}
+            (stems = tutti e 6, midi = solo quelli melodici)
+    """
+    import io
     import pathlib
     import subprocess
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
-        src = pathlib.Path(td) / "in.wav"
+        td = pathlib.Path(td)
+        src = td / "in.wav"
         src.write_bytes(audio)
 
+        # 1) Demucs su GPU: separazione completa a 6 stems
         subprocess.run(
             [
                 "python", "-m", "demucs.separate",
-                "-n", "htdemucs_6s",
-                "--two-stems=guitar",
+                "-n", model,
                 "--device", "cuda",
-                "-o", str(pathlib.Path(td) / "sep"),
+                "-o", str(td / "sep"),
                 str(src),
             ],
             check=True,
             capture_output=True,
         )
+        wavs = {
+            p.stem.lower(): p
+            for p in (td / "sep").rglob("*.wav")
+            if p.stem.lower() in ALL_STEMS
+        }
+        missing = [s for s in ALL_STEMS if s not in wavs]
+        if missing:
+            raise RuntimeError(f"Demucs: stems mancanti: {missing}")
 
-        hits = list(pathlib.Path(td).rglob("guitar.wav"))
-        if not hits:
-            raise RuntimeError("Demucs: stem chitarra non trovato")
+        # 2) stems compattati (mono 22 kHz): servono solo al worker per
+        #    rilevamento energia e trascrizione batteria, non per l'ascolto
+        stems: dict[str, bytes] = {}
+        for name, wav in wavs.items():
+            small = td / f"{name}.small.wav"
+            subprocess.run(
+                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                 "-i", str(wav), "-ac", "1", "-ar", "22050", str(small)],
+                check=True, capture_output=True,
+            )
+            stems[name] = small.read_bytes()
 
+        # 3) Basic Pitch per ogni stem melodico (CPU del container GPU)
+        midi: dict[str, bytes] = {}
         from basic_pitch.inference import predict
 
-        _, midi_data, _ = predict(str(hits[0]))
-        out = pathlib.Path(td) / "out.mid"
-        midi_data.write(str(out))
-        return out.read_bytes()
+        for name in MELODIC:
+            _, midi_data, _ = predict(str(wavs[name]))
+            buf = io.BytesIO()
+            midi_data.write(buf)
+            midi[name] = buf.getvalue()
+
+        return {"stems": stems, "midi": midi}
 
 
 @app.local_entrypoint()
-def main(path: str = ""):
-    """modal run modal_app.py --path brano.mp3 -> scrive brano.mid accanto al file."""
-    if not path:
-        print("usa: modal run modal_app.py --path <file audio>")
-        return
-    out = transcribe.remote(open(path, "rb").read())
-    dest = path.rsplit(".", 1)[0] + ".mid"
-    with open(dest, "wb") as fh:
-        fh.write(out)
-    print("scritto", dest)
+def main(path: str = "", out_dir: str = ""):
+    """modal run modal_app.py --path brano.wav [--out-dir /tmp/out]"""
+    import pathlib
+
+    audio = pathlib.Path(path).read_bytes()
+    res = separate_and_transcribe.remote(audio)
+    dest = pathlib.Path(out_dir) if out_dir else pathlib.Path(path).parent
+    dest.mkdir(parents=True, exist_ok=True)
+    for name, blob in res["stems"].items():
+        (dest / f"{name}.wav").write_bytes(blob)
+    for name, blob in res["midi"].items():
+        (dest / f"{name}.mid").write_bytes(blob)
+    print("stems+midi scritti in", dest)

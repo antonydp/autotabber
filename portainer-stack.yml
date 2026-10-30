@@ -12,9 +12,13 @@
 #  Deploy su Portainer:
 #    Stacks -> autotabber -> Editor -> incolla questo file -> Update
 #
-#  Suggerimento: se attivi Modal (MODAL_ENABLED=1), Demucs gira
-#  dentro Modal: imposta anche DEMUCS_ENABLED=0 per evitare la
-#  separazione doppia (locale + remota).
+#  Modal (opzionale, CONSIGLIATO): Demucs GPU + trascrizione Basic Pitch
+#  girano su una T4 in Modal in una sola chiamata (~1-3 min a brano) invece
+#  che in CPU locale (decine di minuti). Setup:
+#    1. pip install modal && modal setup && modal deploy modal_app.py
+#    2. env: MODAL_ENABLED=1, MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+#    3. lascia DEMUCS_ENABLED=1 (e' il flag "fai la separazione"; con
+#       Modal attivo viene comunque eseguita, solo su GPU remota).
 # ============================================================
 
 services:
@@ -69,7 +73,7 @@ services:
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
       MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
       MODAL_APP: ${MODAL_APP:-autotabber}
-      MODAL_FN: ${MODAL_FN:-transcribe}
+      MODAL_FN: ${MODAL_FN:-separate_and_transcribe}
       TORCH_HOME: /data/torch-cache
     volumes:
       - app-data:/data

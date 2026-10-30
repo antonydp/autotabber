@@ -18,7 +18,8 @@ import numpy as np
 
 log = logging.getLogger("autotabber.analysis")
 
-SR = 22050  # usata solo come default per batteria/rhythm; i load restano nativi
+SR = 22050  # sample rate fissa del rilevamento: mix e stem devono avere
+            # frame allineati (gli stem Modal arrivano gia' a 22 kHz)
 HOP = 512
 
 # Rilevamento via 90° percentile: uno strumento e' presente se il suo
@@ -32,11 +33,12 @@ MELODIC_STEMS = ["vocals", "guitar", "bass", "piano", "other"]
 
 
 def _load_mono(path: Path) -> np.ndarray:
-    """Carica mono alla sample rate NATIVA (niente resampling: piu' robusto
-    e sufficiente per la misura di energia)."""
+    """Carica mono a SR FISSA: il confronto mix/stem richiede lo stesso
+    numero di frame per gli stessi secondi di audio (con sr=None un mix
+    a 44.1 kHz e uno stem a 22 kHz non sarebbero allineati)."""
     import librosa
 
-    y, _ = librosa.load(str(path), sr=None, mono=True)
+    y, _ = librosa.load(str(path), sr=SR, mono=True)
     return y
 
 
