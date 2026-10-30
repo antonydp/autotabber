@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir torch==2.5.1 torchaudio==2.5.1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY worker.py pipeline.py transcribe.py tex.py gp5.py ./
+COPY worker.py pipeline.py analysis.py build_tracks.py rhythm.py frets.py \
+     transcribe.py tex.py gp5.py ./
 
 CMD ["python", "worker.py"]

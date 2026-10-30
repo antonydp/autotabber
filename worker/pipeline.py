@@ -1,7 +1,13 @@
-"""Pipeline: file caricato -> audio.wav (ffmpeg) -> stem chitarra -> MIDI -> alphaTex.
+"""Pipeline: file caricato -> audio -> stems Demucs -> trascrizione per
+strumento -> tab multi-traccia (alphaTex + Guitar Pro 5).
 
 Niente YouTube/Cobalt: il file audio/video e' stato caricato dall'utente
 via POST /api/upload e sta nella cartella del job (source_file).
+
+Strumenti rilevati automaticamente dall'energia degli stem Demucs:
+voce, chitarra, basso, piano, altro (synth/strings) e batteria —
+ognuno diventa una traccia del tab, anche la voce (mappata sulla
+tastiera, come le tab di melodia).
 """
 
 import json
@@ -9,11 +15,15 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import traceback
 from pathlib import Path
 
 import redis
+
+import analysis
+import build_tracks
+import rhythm
+from transcribe import transcribe_file
 
 log = logging.getLogger("autotabber.pipeline")
 logging.basicConfig(
@@ -27,13 +37,14 @@ MAX_DURATION = int(os.getenv("MAX_DURATION_SEC") or os.getenv("YT_MAX_DURATION_S
 DEMUCS_ENABLED = os.getenv("DEMUCS_ENABLED", "1") == "1"
 DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "htdemucs_6s")
 KEEP_AUDIO = os.getenv("KEEP_AUDIO", "0") == "1"
+SR = analysis.SR
 
 r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 STAGE_PROGRESS = {
     "preparing": 10,
-    "separating": 40,
-    "transcribing": 70,
+    "separating": 35,
+    "transcribing": 75,
     "rendering": 90,
     "done": 100,
 }
@@ -45,10 +56,6 @@ def _set(job_id: str, **fields) -> None:
 
 def _stage(job_id: str, stage: str) -> None:
     _set(job_id, stage=stage, status=stage, progress=str(STAGE_PROGRESS.get(stage, 0)))
-
-
-# Il file audio/video e' stato caricato dall'utente via /api/upload:
-# qui si estrae l'audio con ffmpeg e si prosegue con la pipeline.
 
 
 def _ffmpeg_to_wav(src: Path, dst: Path) -> None:
@@ -74,54 +81,150 @@ def _ffprobe_duration(path: Path):
         return None
 
 
-def separate_guitar(audio: Path, d: Path) -> Path:
-    out_dir = d / "separated"
-    cmd = [
-        sys.executable, "-m", "demucs.separate",
-        "-n", DEMUCS_MODEL,
-        "--two-stems=guitar",
-        "-o", str(out_dir),
-        str(audio),
-    ]
-    log.info("demucs: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "")[-800:]
-        raise RuntimeError(f"Demucs fallito: {tail}")
-    hits = list(out_dir.rglob("guitar.wav"))
-    if not hits:
-        raise RuntimeError("Demucs: stem chitarra non trovato")
-    stem = d / "guitar.wav"
-    shutil.copy(hits[0], stem)
-    return stem
+def _build_track_for_stem(stem: str, midi_path: Path, bpm: float, anchor: float):
+    """Stem trascritto in MIDI -> traccia con nome/strumento/diteggiatura."""
+    from frets import BASS_TUNING, GUITAR_TUNING
+
+    notes = build_tracks.load_notes(midi_path)
+    if stem == "vocals":
+        return build_tracks.build_melodic_track(
+            notes, bpm, anchor, name="Voce", instrument="choiraahs",
+            tuning=GUITAR_TUNING, monophonic=True, max_poly=1)
+    if stem == "guitar":
+        return build_tracks.build_melodic_track(
+            notes, bpm, anchor, name="Chitarra", instrument="electricguitarclean",
+            tuning=GUITAR_TUNING, monophonic=False, max_poly=4)
+    if stem == "bass":
+        return build_tracks.build_melodic_track(
+            notes, bpm, anchor, name="Basso", instrument="electricbassfinger",
+            tuning=BASS_TUNING, monophonic=False, max_poly=2,
+            range_lo=build_tracks.BASS_LO, range_hi=build_tracks.BASS_HI)
+    if stem == "piano":
+        return build_tracks.build_melodic_track(
+            notes, bpm, anchor, name="Piano", instrument="acousticgrandpiano",
+            tuning=GUITAR_TUNING, monophonic=False, max_poly=6)
+    if stem == "other":
+        return build_tracks.build_melodic_track(
+            notes, bpm, anchor, name="Synth", instrument="stringensemble1",
+            tuning=GUITAR_TUNING, monophonic=False, max_poly=6)
+    return None
 
 
-def load_notes(midi_path: Path) -> list:
-    """MIDI -> [{start, end, midi}] in secondi (usa mido).
+def process(d: Path, source_name: str, title: str, progress=None) -> dict:
+    """Core della pipeline, indipendente da redis (usabile nei test).
 
-    NB: iterando MidiFile, mido converte gia' msg.time in secondi
-    (delta) applicando i set_tempo incontrati lungo il brano.
+    progress(stage: str, pct: int) -> None
     """
-    import mido
+    progress = progress or (lambda stage, pct: None)
+    src = d / source_name
+    if not src.exists():
+        raise RuntimeError(f"File caricato non trovato: {source_name}")
+    meta = {"title": title or "Senza titolo", "artist": "", "duration": 0}
 
-    mid = mido.MidiFile(str(midi_path))
-    seconds = 0.0
-    active: dict = {}
-    notes = []
-    for msg in mid:
-        seconds += msg.time  # secondi (delta), tempo-aware
-        if msg.type == "note_on" and msg.velocity > 0:
-            active.setdefault((msg.channel, msg.note), []).append(seconds)
-        elif msg.type == "note_off" or (
-            msg.type == "note_on" and msg.velocity == 0
-        ):
-            starts = active.get((msg.channel, msg.note))
-            if starts:
-                s = starts.pop(0)
-                if seconds > s:
-                    notes.append({"start": s, "end": seconds, "midi": msg.note})
-    notes.sort(key=lambda n: (n["start"], n["midi"]))
-    return notes
+    # 1) estrazione audio -> wav (ffmpeg)
+    progress("preparing", STAGE_PROGRESS["preparing"])
+    _ffmpeg_to_wav(src, d / "audio.wav")
+    duration = _ffprobe_duration(d / "audio.wav") or 0
+    if duration > MAX_DURATION:
+        raise RuntimeError(
+            f"Brano troppo lungo ({int(duration)}s > {MAX_DURATION}s): "
+            "aumenta MAX_DURATION_SEC se serve"
+        )
+    meta["duration"] = duration
+    audio = d / "audio.wav"
+
+    # 2) separazione stems + rilevamento strumenti
+    progress("separating", 15)
+    if DEMUCS_ENABLED:
+        stems = analysis.separate_all(audio, d, DEMUCS_MODEL)
+        detection = analysis.detect_instruments(stems, audio)
+    else:
+        # niente separazione: tutto il mix su una traccia chitarra
+        stems = {"other": audio}
+        detection = {"other": {"present": True, "rel_db": 0.0, "abs_db": 0.0}}
+
+    # 3) tempo/beat dal mix (una sola volta, vale per tutte le tracce)
+    import librosa
+    mix_y, mix_sr = librosa.load(str(audio), sr=None, mono=True)
+
+    # 4) trascrizione per ogni strumento presente
+    tracks = []
+    perc_notes = {}
+    order = ["vocals", "guitar", "bass", "piano", "other"]
+    present_melodic = [s for s in order if detection.get(s, {}).get("present")]
+    drums_present = detection.get("drums", {}).get("present", False)
+    n_steps = len(present_melodic) + (1 if drums_present else 0)
+    if n_steps == 0:
+        raise RuntimeError(
+            "Nessuno strumento rilevato nel brano: prova con un file piu' "
+            "chiaro o alza il volume della sorgente"
+        )
+    done = 0
+
+    notes_for_rhythm: list = []
+    for stem in present_melodic:
+        progress("transcribing", 40 + int(35 * done / max(n_steps, 1)))
+        midi_path = d / f"{stem}.mid"
+        transcribe_file(stems[stem], midi_path)
+        notes = build_tracks.load_notes(midi_path)
+        perc_notes[stem] = notes
+        notes_for_rhythm.extend(notes)
+        done += 1
+
+    bpm, anchor = rhythm.estimate_rhythm(
+        mix_y, mix_sr, notes_for_rhythm if notes_for_rhythm else
+        [{"start": 0.0, "end": duration, "midi": 60}]
+    )
+    meta["tempo"] = int(round(bpm))
+
+    for stem in present_melodic:
+        progress("transcribing", 40 + int(35 * done / max(n_steps, 1)))
+        track = _build_track_for_stem(stem, d / f"{stem}.mid", bpm, anchor)
+        if track:
+            tracks.append(track)
+            log.info("traccia %s: %d note", track["name"], track["notes"])
+        done += 1
+
+    if drums_present:
+        progress("transcribing", 40 + int(35 * done / max(n_steps, 1)))
+        drum_track = build_tracks.transcribe_drums(
+            stems["drums"], mix_sr, bpm, anchor)
+        if drum_track:
+            tracks.append(drum_track)
+        done += 1
+
+    if not tracks:
+        raise RuntimeError(
+            "Strumenti rilevati ma nessuna nota trascrivibile: brano troppo "
+            "complesso o registrazione di bassa qualita'"
+        )
+
+    # 5) rendering alphaTex multi-traccia + export Guitar Pro 5
+    progress("rendering", STAGE_PROGRESS["rendering"])
+    from gp5 import build_gp5
+    from tex import render
+
+    tex, info = render(tracks, meta, bpm)
+    result = {"tex": tex, "meta": {**meta, **info}}
+    (d / "result.json").write_text(
+        json.dumps(result, ensure_ascii=False), encoding="utf-8")
+
+    gp5_b = build_gp5(tracks, meta.get("title") or "Autotabber", int(round(bpm)))
+    gp5_flag = "0"
+    if gp5_b:
+        (d / "tab.gp5").write_bytes(gp5_b)
+        gp5_flag = "1"
+
+    if not KEEP_AUDIO:
+        for p in d.glob("*.mid"):
+            p.unlink()
+        shutil.rmtree(d / "stems", ignore_errors=True)
+        for name in ("audio.wav", "input.tmp"):
+            p = d / name
+            if p.exists():
+                p.unlink()
+
+    return {"result": result, "gp5": gp5_flag, "detection": detection}
 
 
 def run_job(job_id: str) -> None:
@@ -132,66 +235,21 @@ def run_job(job_id: str) -> None:
         title = r.hget(f"job:{job_id}", "title")
         if not source:
             raise RuntimeError("Nessun file caricato per questo job")
-        src = d / source
-        if not src.exists():
-            raise RuntimeError(f"File caricato non trovato: {source}")
-        meta = {"title": title or "Senza titolo", "artist": "", "duration": 0}
 
-        # 1) estrazione audio -> wav (ffmpeg)
-        _stage(job_id, "preparing")
-        _ffmpeg_to_wav(src, d / "audio.wav")
-        duration = _ffprobe_duration(d / "audio.wav") or 0
-        if duration > MAX_DURATION:
-            raise RuntimeError(
-                f"Brano troppo lungo ({int(duration)}s > {MAX_DURATION}s): "
-                "aumenta MAX_DURATION_SEC se serve"
-            )
-        meta["duration"] = duration
-        _set(job_id, duration=str(int(duration or 0)))
-        audio = d / "audio.wav"
-        if not audio.exists():
-            raise RuntimeError("Estrazione audio fallita (audio.wav mancante)")
+        def progress(stage: str, pct: int) -> None:
+            _set(job_id, stage=stage, status=stage, progress=str(int(pct)))
 
-        # 2) separazione stem chitarra
-        _stage(job_id, "separating")
-        stem = separate_guitar(audio, d) if DEMUCS_ENABLED else audio
-
-        # 3) trascrizione audio -> MIDI (Modal GPU se configurata, altrimenti Basic Pitch)
-        _stage(job_id, "transcribing")
-        from transcribe import transcribe_file
-
-        midi_path = d / "out.mid"
-        transcribe_file(stem, midi_path)
-
-        # 4) rendering alphaTex con diteggiatura + export Guitar Pro 5
-        _stage(job_id, "rendering")
-        from tex import render
-        from gp5 import build_gp5
-
-        notes = load_notes(midi_path)
-        tex, info, (chord_list, end_map) = render(notes, meta)
-        result = {"tex": tex, "meta": {**meta, **info}}
-        (d / "result.json").write_text(
-            json.dumps(result, ensure_ascii=False), encoding="utf-8"
-        )
-        gp5_b = build_gp5(
-            chord_list, end_map, info["tempo"], meta.get("title") or "Autotabber"
-        )
-        gp5_flag = "0"
-        if gp5_b:
-            (d / "tab.gp5").write_bytes(gp5_b)
-            gp5_flag = "1"
-        _set(job_id, gp5=gp5_flag)
-
-        if not KEEP_AUDIO:
-            for name in ("audio.wav", "guitar.wav", "input.tmp"):
-                p = d / name
-                if p.exists():
-                    p.unlink()
-            shutil.rmtree(d / "separated", ignore_errors=True)
-
+        out = process(d, source, title, progress)
+        info = out["result"]["meta"]
+        _set(job_id,
+             duration=str(int(info.get("duration") or 0)),
+             tracks=json.dumps(info.get("tracks", []), ensure_ascii=False),
+             gp5=out["gp5"],
+             detection=json.dumps(out["detection"], ensure_ascii=False))
         _stage(job_id, "done")
-        log.info("job %s completato: %s", job_id, info)
+        log.info("job %s completato: tempo=%s battute=%s tracce=%s",
+                 job_id, info.get("tempo"), info.get("bars"),
+                 [t["name"] for t in info.get("tracks", [])])
     except Exception as exc:  # noqa: BLE001
         log.error("job %s fallito:\n%s", job_id, traceback.format_exc())
         _set(job_id, status="error", stage="error", progress="0",

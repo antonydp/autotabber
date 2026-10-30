@@ -1,64 +1,27 @@
-"""Generazione alphaTex: note trascritte -> tab chitarra con diteggiatura.
+r"""Generazione alphaTex multi-traccia: una traccia per strumento rilevato.
 
-Strategia:
-  - stima BPM dai profili di attacco (inter-onset intervals, mediana ripiegata)
-  - quantizzazione a sedicesimi sul tempo stimato
-  - assegnazione corda/tasto (diteggiatura) su accordatura standard,
-    preferendo tasti bassi e continuita' di posizione della mano
-  - note simultanee raggruppate in accordi (corde distinte)
+Formato (alphaTab alphaTex, sintassi verificata sul bundle venduto):
+  \title / \artist / \tempo
+  \track "Voce" \instrument choiraahs
+  \tuning E4 B3 G3 D3 A2 E2        (obbligatoria per le tracce non percussive)
+  :4 3.2 5.1 | ...
+  \track "Batteria" \instrument percussion
+  :8 36 :8 38 ...                   (numeri GM senza suffisso corda)
+Ogni traccia ha lo stesso numero di battute (pause per riempire).
 """
 
-from statistics import median
+from __future__ import annotations
+
 from typing import Dict, List, Optional, Tuple
 
-# Corde 1..6 (1 = Mi cantino): accordatura standard E4 B3 G3 D3 A2 E2
-TUNING: List[int] = [64, 59, 55, 50, 45, 40]
-MAX_FRET = 22
 STEPS_PER_BAR = 16  # sedicesimi per battuta (4/4)
 DUR_TOKEN = {1: ":16", 2: ":8", 4: ":4", 8: ":2", 16: ":1"}
 
-
-def _fit_bpm(notes: List[dict]) -> int:
-    if len(notes) < 4:
-        return 120
-    onsets = sorted(n["start"] for n in notes)
-    iois = [b - a for a, b in zip(onsets, onsets[1:]) if 0.06 <= (b - a) <= 1.5]
-    if not iois:
-        return 120
-    folded = []
-    for t in (60.0 / i for i in iois):
-        while t < 70:
-            t *= 2
-        while t >= 200:
-            t /= 2
-        folded.append(t)
-    bpm = int(round(median(folded)))
-    return max(50, min(200, bpm))
+NOTE_NAME = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 
-def _choose(
-    midi: int, used: set, c_fret: float, c_str: float
-) -> Optional[Tuple[int, int]]:
-    """Ritorna (corda, tasto) per una nota, o None se fuori estensione."""
-    if midi < TUNING[5]:
-        midi += 12
-        if midi < TUNING[5]:
-            return None
-    best: Optional[Tuple[int, int]] = None
-    best_score = 0.0
-    for s in range(1, 7):
-        fret = midi - TUNING[s - 1]
-        if fret < 0 or fret > MAX_FRET or s in used:
-            continue
-        score = (
-            fret
-            + 0.35 * abs(fret - c_fret)
-            + 0.15 * abs(s - c_str)
-            - (1.5 if fret == 0 else 0.0)
-        )
-        if best is None or score < best_score:
-            best, best_score = (s, fret), score
-    return best
+def _note_name(midi: int) -> str:
+    return f"{NOTE_NAME[midi % 12]}{midi // 12 - 1}"
 
 
 def _escape(text: str) -> str:
@@ -66,111 +29,123 @@ def _escape(text: str) -> str:
     return " ".join(cleaned.split())[:80]
 
 
-def render(notes: List[dict], meta: dict) -> Tuple[str, dict]:
-    if not notes:
-        raise ValueError("Nessuna nota rilevata: impossibile generare il tab")
+def _tuning_token(tuning: List[int]) -> str:
+    """\\tuning con cantino per primo (corda 1)."""
+    return " ".join(_note_name(m) for m in tuning)
 
-    bpm = _fit_bpm(notes)
-    step = 60.0 / bpm / 4.0  # durata di un sedicesimo in secondi
 
-    # quantizza: (start16, end16, midi)
-    events: List[Tuple[int, int, int]] = []
-    for n in notes:
-        s = int(round(n["start"] / step))
-        e = max(int(round(n["end"] / step)), s + 1)
-        if e - s > 32:  # note tenute oltre 2 battute: tronca
-            e = s + 32
-        events.append((s, e, n["midi"]))
-    events.sort(key=lambda ev: (ev[0], ev[1]))
+def _emit_track_tokens(track: dict, bars: int) -> List[str]:
+    """Token alphaTex di una traccia: note, pause, barre."""
+    grouped: List[Tuple[int, List[Tuple[int, int]]]] = track["grouped"]
+    end_map: Dict[int, int] = track["end_map"]
+    percussion: bool = track["percussion"]
 
-    # assegna corda/tasto, raggruppando le simultanee in accordi
-    grouped: Dict[int, List[Tuple[int, int]]] = {}
-    end_map: Dict[int, int] = {}
-    c_fret, c_str = 5.0, 3.0
-    for s, _e, midi in events:
-        used = {p[0] for p in grouped.get(s, [])}
-        pick = _choose(midi, used, c_fret, c_str)
-        if pick is None:
-            continue
-        grouped.setdefault(s, []).append(pick)
-        end_map[s] = max(end_map.get(s, _e), _e)
-        c_fret = 0.7 * c_fret + 0.3 * pick[1]
-        c_str = 0.7 * c_str + 0.3 * pick[0]
-    if not grouped:
-        raise ValueError("Nessuna nota in range chitarra (E2..E6 +22 tasti)")
-    chord_list = sorted(grouped.items())
+    def token_for(picks) -> str:
+        if percussion:
+            # percussionArticulation = numero GM (36 cassa, 38 rullante, ...)
+            picks = [p if isinstance(p, int) else p[0] for p in picks]
+            return "(" + " ".join(str(art) for art in picks) + ")" \
+                if len(picks) > 1 else str(picks[0])
+        picks = sorted(picks)  # corda crescente
+        if len(picks) > 1:
+            return "(" + " ".join(f"{fret}.{st}" for st, fret in picks) + ")"
+        return f"{picks[0][1]}.{picks[0][0]}"
 
-    # emissione token alphaTex
     out: List[str] = []
     pos = 0
     cur_dur = 0
+    total_steps = bars * STEPS_PER_BAR
 
-    def emit_chunk(p: int, size: int, token: str) -> None:
+    def emit(p: int, size: int, tok: str) -> None:
         nonlocal pos, cur_dur
         if p % STEPS_PER_BAR == 0 and p > 0 and out and out[-1] != "|":
             out.append("|")
         if DUR_TOKEN[size] != cur_dur:
             out.append(DUR_TOKEN[size])
             cur_dur = size
-        out.append(token)
+        out.append(tok)
         pos = p + size
 
-    for i, (s, picks) in enumerate(chord_list):
+    for i, (s, picks) in enumerate(grouped):
         if s < pos:  # sovrapposizione residua: salta
             continue
         if s > pos:  # pause fino al prossimo attacco
-            gap = s - pos
+            gap = min(s, total_steps) - pos
             while gap > 0:
                 k = max(k for k in DUR_TOKEN if k <= gap)
-                emit_chunk(pos, k, "r")
+                emit(pos, k, "r")
                 gap -= k
-        picks = sorted(picks)
-        if len(picks) > 1:
-            token = "(" + " ".join(f"{f}.{st}" for st, f in picks) + ")"
-        else:
-            token = f"{picks[0][1]}.{picks[0][0]}"
-        next_s = chord_list[i + 1][0] if i + 1 < len(chord_list) else end_map[s]
-        u = min(end_map[s], next_s) - s
+        if s >= total_steps:
+            break
+        next_s = grouped[i + 1][0] if i + 1 < len(grouped) else end_map.get(s, s + 1)
+        u = min(end_map.get(s, s + 1), next_s) - s
         u = max(u, 1)
+        tok = token_for(picks)
         while u > 0:
             k = max(k for k in DUR_TOKEN if k <= u)
-            emit_chunk(pos, k, token)
+            emit(pos, k, tok)
             u -= k
-
-    # completa l'ultima battuta di pause
-    while pos % STEPS_PER_BAR != 0:
-        rem = STEPS_PER_BAR - (pos % STEPS_PER_BAR)
+    # riempi fino alla fine (battute complete)
+    while pos < total_steps:
+        rem = min(STEPS_PER_BAR - (pos % STEPS_PER_BAR), total_steps - pos)
         k = max(k for k in DUR_TOKEN if k <= rem)
-        emit_chunk(pos, k, "r")
+        emit(pos, k, "r")
     if out and out[-1] != "|":
         out.append("|")
+    return out
 
-    # righe da ~12 token per leggibilità
+
+def _wrap(tokens: List[str], width: int = 12) -> List[str]:
     lines, line = [], []
-    for t in out:
+    for t in tokens:
         line.append(t)
-        if len(line) >= 12:
+        if len(line) >= width:
             lines.append(" ".join(line))
             line = []
     if line:
         lines.append(" ".join(line))
+    return lines
 
-    title = _escape(meta.get("title") or "Tab")
-    artist = _escape(meta.get("artist") or meta.get("uploader") or "")
-    head = [f'\\title "{title}"']
+
+def render(tracks: List[dict], meta: dict, bpm: float) -> Tuple[str, dict]:
+    """Tracce costruite -> alphaTex completo. Solleva se non c'e' nulla."""
+    if not tracks:
+        raise ValueError("Nessuna traccia generata: impossibile creare il tab")
+
+    max_end = 1
+    for t in tracks:
+        for s, picks in t["grouped"]:
+            max_end = max(max_end, t["end_map"].get(s, s + 1))
+    bars = max(2, (max_end + STEPS_PER_BAR - 1) // STEPS_PER_BAR)
+
+    head: List[str] = [
+        f'\\title "{_escape(meta.get("title") or "Tab")}"',
+    ]
+    artist = _escape(meta.get("artist") or "")
     if artist:
         head.append(f'\\artist "{artist}"')
-    head.append(f"\\tempo {bpm}")
-    head.append("\\instrument electricguitarclean")
-    head.append('\\track "Chitarra"')
+    head.append(f"\\tempo {max(30, min(300, int(round(bpm))))}")
     head.append(".")
-    head.append("")
 
-    tex = "\n".join(head) + "\n".join(lines) + "\n"
+    body: List[str] = []
+    for t in tracks:
+        # sintassi verificata sul bundle: \track + \instrument inline (niente
+        # graffe), \tuning su riga separata obbligatoria per le non percussive
+        body.append(f'\\track "{_escape(t["name"])}" \\instrument {t["instrument"]}')
+        if t.get("tuning") and not t["percussion"]:
+            body.append(f"\\tuning {_tuning_token(t['tuning'])}")
+        body.extend(_wrap(_emit_track_tokens(t, bars)))
+        body.append("")
+
+    tex = "\n".join(head) + "\n".join(body).rstrip() + "\n"
     info = {
-        "tempo": bpm,
-        "bars": out.count("|"),
-        "chords": len(chord_list),
-        "notes": sum(len(p) for _, p in chord_list),
+        "tempo": int(round(bpm)),
+        "bars": bars,
+        "tracks": [
+            {"name": t["name"], "instrument": t["instrument"],
+             "notes": t["notes"], "percussion": t["percussion"]}
+            for t in tracks
+        ],
+        "notes": sum(t["notes"] for t in tracks),
     }
-    return tex, info, (chord_list, end_map)
+    return tex, info

@@ -23,6 +23,29 @@ const state = {
 
 /* ---------- utility ---------- */
 
+function parseTracks(job) {
+  if (!job || !job.tracks) return [];
+  try {
+    const arr = JSON.parse(job.tracks);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function trackChips(tracks) {
+  if (!tracks || !tracks.length) return "";
+  return tracks
+    .map((t) => `<span class="chip done">${escapeHtml(t.name || "?")}${t.notes ? ` · ${t.notes}` : ""}</span>`)
+    .join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
 function fmtDur(sec) {
   sec = parseInt(sec || 0, 10);
   if (!sec) return "";
@@ -61,6 +84,7 @@ function jobCard(job) {
       <div>
         <div class="title"></div>
         <div class="artist"></div>
+        <div class="chips"></div>
       </div>
       <div class="grow"></div>
       <span class="chip ${job.status === "done" ? "done" : job.status === "error" ? "error" : busy ? "busy" : ""}">${label}</span>
@@ -74,6 +98,9 @@ function jobCard(job) {
   el.querySelector(".title").textContent = job.title || job.filename || job.id;
   el.querySelector(".artist").textContent =
     [job.artist, fmtDur(job.duration)].filter(Boolean).join(" · ");
+  const chipsEl = el.querySelector(".chips");
+  const chips = trackChips(parseTracks(job));
+  if (chips) chipsEl.innerHTML = chips; else chipsEl.remove();
   const chip = el.querySelector(".chip");
   if (busy) chip.textContent = `${label} · ${job.progress || 0}%`;
   if (job.status === "error") el.querySelector(".error-text").textContent = job.error || "Errore sconosciuto";
@@ -234,6 +261,7 @@ async function openPlayer(id) {
 
   $("#pv-title").textContent = job.title || id;
   $("#pv-artist").textContent = job.artist || "";
+  $("#pv-tracks").innerHTML = trackChips(parseTracks(job));
   $("#dl-midi").href = `/api/jobs/${id}/midi`;
   $("#dl-tex").href = `/api/jobs/${id}/tex`;
   const gp5 = $("#dl-gp5");
@@ -254,7 +282,15 @@ async function openPlayer(id) {
     const res = await fetch(`/api/jobs/${id}/tex`);
     const tex = await res.text();
     const load = apiAT.tex ? (t) => apiAT.tex(t) : (t) => apiAT.loadAlphaTex(t);
-    load(tex);
+    // alphaTab renderizza solo le tracce passate come secondo argomento
+    // (default [0]): servono tutti gli indici delle tracce rilevate
+    const nTracks = Math.max(1, parseTracks(job).length);
+    const all = Array.from({ length: nTracks }, (_, i) => i);
+    try {
+      load(tex, all);
+    } catch (_) {
+      load(tex); // fallback: solo la prima traccia
+    }
     state.renderedFor = id;
     setTimeout(() => {
       if (state.currentJob === id && !$("#alphaTab svg")) {

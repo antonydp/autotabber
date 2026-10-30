@@ -1,19 +1,35 @@
 # 🎸 Autotabber
 
 **Self-hosted, pronto per Portainer.** Carica un file audio (o un video da
-cui estrarre l'audio) e ottieni una tablatura chitarra con diteggiatura,
-visualizzata e **suonabile nel browser** (grazie ad alphaTab), senza
-dipendenze da servizi a pagamento.
+cui estrarre l'audio) e ottieni un tab **multi-traccia in stile Songsterr**:
+lo strumento capisce da solo quali strumenti ci sono nel brano — voce,
+chitarra, basso, piano, synth e batteria — e genera una tabulatura per
+ognuno, **voce inclusa** (mappata sulla tastiera), visualizzata e
+**suonabile nel browser** (alphaTab), senza dipendenze da servizi a pagamento.
 
 Niente YouTube, niente proxy, niente blocchi anti-bot: il file lo carichi
 tu dal browser (drag & drop) e viene processato interamente nel tuo server.
 Formati accettati: `.mp3 .wav .m4a .flac .ogg .opus .aac .wma .webm .mp4`.
 
 ```
-file caricato ──ffmpeg──► audio.wav ──Demucs (htdemucs_6s)──► stem chitarra
-     ──Basic Pitch──► MIDI ──tex.py (BPM + diteggiatura)──► alphaTex
-     ──alphaTab nel browser──► tab suonabile ▶
+file caricato ──ffmpeg──► audio.wav ──Demucs (htdemucs_6s, 6 stems)──► stems
+     │  energia p90 per stem ──► strumenti presenti (voce/chitarra/basso/
+     │  piano/synth/batteria)
+     ├─ stem melodici ──Basic Pitch──► MIDI ──quantizzazione sul beat grid
+     │  ──diteggiatura cost-based──► tracce con corda/tasto
+     ├─ stem batteria ──onsets + bande di frequenza──► notazione percussione
+     └─ tex.py ──► alphaTex multi-traccia ──alphaTab──► tab suonabile ▶
+         (+ export Guitar Pro 5 con tutte le tracce)
 ```
+
+### Come funziona il rilevamento degli strumenti
+
+Ogni stem Demucs viene misurato con il **90° percentile dell'energia**
+sui frame attivi del mix: uno strumento e' "presente" se il suo stem
+tocca un'energia vicina a quella del mix almeno in una parte rumorosa
+del brano (cosi' vengono visti anche gli strumenti che suonano solo in
+alcune sezioni). Soglie regolabili con `DETECT_REL_DB` e
+`DETECT_DRUMS_REL_DB` nello stack (default -25/-28 dB).
 
 ## Servizi dello stack
 

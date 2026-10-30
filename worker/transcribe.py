@@ -10,6 +10,10 @@ import logging
 import os
 from pathlib import Path
 
+# basic-pitch 0.4 salva il modello in Keras 2: con TensorFlow >= 2.16
+# serve tf-keras in modalita' legacy (con TF 2.15 la variabile e' ignorata)
+os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+
 log = logging.getLogger("autotabber.transcribe")
 
 

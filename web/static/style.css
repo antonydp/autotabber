@@ -111,6 +111,11 @@ h2 { font-size: 1.1rem; margin: 26px 0 12px; }
 .chip.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
 .chip.busy { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
+/* chips delle tracce rilevate */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+#pv-tracks { margin-top: 8px; }
+#pv-tracks .chip { font-size: .82rem; }
+
 .bar {
   height: 5px;
   background: var(--panel-2);

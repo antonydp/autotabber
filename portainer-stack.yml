@@ -59,6 +59,10 @@ services:
       DATA_DIR: /data
       DEMUCS_ENABLED: ${DEMUCS_ENABLED:-1}
       DEMUCS_MODEL: ${DEMUCS_MODEL:-htdemucs_6s}
+      # soglie rilevamento strumenti (p90 stem vs mix, in dB): abbassale
+      # se uno strumento presente non viene visto, alzale se compaiono falsi positivi
+      DETECT_REL_DB: ${DETECT_REL_DB:--25}
+      DETECT_DRUMS_REL_DB: ${DETECT_DRUMS_REL_DB:--28}
       KEEP_AUDIO: ${KEEP_AUDIO:-0}
       MAX_DURATION_SEC: ${MAX_DURATION_SEC:-900}
       MODAL_ENABLED: ${MODAL_ENABLED:-0}
