@@ -149,7 +149,6 @@ def process(d: Path, source_name: str, title: str, progress=None) -> dict:
 
     # 4) trascrizione per ogni strumento presente
     tracks = []
-    perc_notes = {}
     order = ["vocals", "guitar", "bass", "piano", "other"]
     present_melodic = [s for s in order if detection.get(s, {}).get("present")]
     drums_present = detection.get("drums", {}).get("present", False)
@@ -167,7 +166,6 @@ def process(d: Path, source_name: str, title: str, progress=None) -> dict:
         midi_path = d / f"{stem}.mid"
         transcribe_file(stems[stem], midi_path)
         notes = build_tracks.load_notes(midi_path)
-        perc_notes[stem] = notes
         notes_for_rhythm.extend(notes)
         done += 1
 
